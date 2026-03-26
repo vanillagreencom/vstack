@@ -228,27 +228,27 @@ Windows note:
 
 #### UI / Domain
 
-| Skill | Brief |
-|---|---|
-| `iced-rs` | Iced 0.14 patterns, reactive UI rules, and Elm-style structure. |
-| `price-handling` | Price rounding, epsilon comparison, and market-price handling. |
-| `trading-design` | Dense, professional trading-style interface design guidance. |
-| `visual-qa` | Screenshot testing, visual baselines, OCR targeting, and UI verification. |
+| Skill | Brief | Arguments |
+|---|---|---|
+| `iced-rs` | Iced 0.14 patterns, reactive UI rules, and Elm-style structure. | — |
+| `price-handling` | Price rounding, epsilon comparison, and market-price handling. | — |
+| `trading-design` | Dense, professional trading-style interface design guidance. | — |
+| `visual-qa` | Screenshot testing, visual baselines, OCR targeting, and UI verification. | <ul><li><code>/visual-qa setup</code></li><li><code>/visual-qa start [--build] [--size WxH] [--layout FILE]</code></li><li><code>/visual-qa stop</code></li><li><code>/visual-qa screenshot [--output PATH]</code></li><li><code>/visual-qa baseline capture</code></li><li><code>/visual-qa baseline check</code></li></ul> |
 
 #### Workflow / Platform (WIP)
 
 These packages are still WIP. They were migrated from a specific project and have not been tested as thoroughly in the generalized `vstack` setup yet. GitHub issues are welcome.
 
-| Skill | Brief |
-|---|---|
-| `benchmarking` | Benchmark recording, baselines, and regression detection workflows. |
-| `decider` | Architectural decision document management and indexing. |
-| `github` | GitHub PR, thread, review, CI, and merge workflows. |
-| `issue-lifecycle` | Delegated implementation/review/QA issue workflows. |
-| `linear` | Linear issue, cycle, milestone, and project workflows with fully custom API scripts. |
-| `orchestration` | Multi-agent session coordination and workflow state management. |
-| `project-management` | TPM planning flows for cycles, prioritization, and roadmaps. |
-| `worktree` | Git worktree creation, env/config linkage, and isolated workflows. |
+| Skill | Brief | Arguments |
+|---|---|---|
+| `benchmarking` | Benchmark recording, baselines, and regression detection workflows. | <ul><li><code>/benchmarking bench</code></li></ul> |
+| `decider` | Architectural decision document management and indexing. | — |
+| `github` | GitHub PR, thread, review, CI, and merge workflows. | — |
+| `issue-lifecycle` | Delegated implementation/review/QA issue workflows. | — |
+| `linear` | Linear issue, cycle, milestone, and project workflows with fully custom API scripts. | — |
+| `orchestration` | Multi-agent session coordination and workflow state management. | <ul><li><code>/orchestration start [ISSUE_ID]</code></li><li><code>/orchestration start new [title]</code></li><li><code>/orchestration start self</code></li><li><code>/orchestration dev-start [ISSUE_ID]</code></li><li><code>/orchestration dev-fix [ISSUE_ID]</code></li><li><code>/orchestration ci-fix &lt;PR_NUMBER|queue&gt;</code></li><li><code>/orchestration review-pr [PR_NUMBER]</code></li><li><code>/orchestration review-pr-comments &lt;PR_NUMBER|BRANCH&gt;</code></li><li><code>/orchestration submit-pr [PR_NUMBER]</code></li><li><code>/orchestration merge-pr &lt;PR_NUMBER|all&gt;</code></li><li><code>/orchestration audit-issues &lt;project | project "Name" | issue [IDs] | --issues [file]&gt;</code></li><li><code>/orchestration cycle-plan</code></li><li><code>/orchestration roadmap plan [feature] [@research-path]</code></li><li><code>/orchestration roadmap create @plan-file</code></li><li><code>/orchestration parallel-check [ISSUE_IDS|"Project Name"]</code></li><li><code>/orchestration post-summary [ISSUE_ID]</code></li><li><code>/orchestration research-complete [ISSUE_ID]</code></li><li><code>/orchestration research-spike</code></li><li><code>/orchestration start-retro</code></li></ul> |
+| `project-management` | TPM planning flows for cycles, prioritization, and roadmaps. | — |
+| `worktree` | Git worktree creation, env/config linkage, and isolated workflows. | <ul><li><code>/worktree create &lt;ID&gt; [--base &lt;ref&gt;] [--pr &lt;N&gt;]</code></li><li><code>/worktree list</code></li><li><code>/worktree remove &lt;ID|path&gt;</code></li><li><code>/worktree cleanup</code></li><li><code>/worktree path &lt;ID&gt;</code></li><li><code>/worktree exists &lt;ID&gt;</code></li><li><code>/worktree check</code></li><li><code>/worktree push [ID|/path] [--set-upstream|-u] [--no-rebase]</code></li></ul> |
 
 ### Hooks
 
