@@ -1,0 +1,205 @@
+#!/bin/bash
+# GitHub API - Get PR with threads, comments, and files
+# Usage: pr-data.sh [PR-number|branch] [--format=safe|raw]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/github-api.sh"
+
+show_help() {
+    cat << 'EOF'
+Get PR Data
+
+Usage: pr-data.sh [PR-number|branch] [options]
+
+Arguments:
+  PR-number|branch    PR number or branch name (default: current branch's PR)
+
+Options:
+  --format=safe       Normalized flat structure (DEFAULT)
+  --format=raw        Original GitHub API structure
+  --actionable        Only unresolved non-outdated threads, exclude bot comments
+
+Output (safe format):
+{
+  "number": 23,
+  "title": "PR title",
+  "branch": "feature-branch",
+  "files": ["path/to/file.rs"],
+  "threads": [{
+    "id": "PRRT_...",
+    "is_resolved": false,
+    "is_outdated": false,
+    "path": "src/file.rs",
+    "line": 42,
+    "comments": [{
+      "author": "reviewer",
+      "body": "Comment text",
+      "url": "https://..."
+    }]
+  }],
+  "comments": [{
+    "id": "IC_...",
+    "author": "reviewer",
+    "body": "PR-level comment",
+    "url": "https://...",
+    "created_at": "2025-01-01T00:00:00Z"
+  }]
+}
+
+Examples:
+  pr-data.sh 23
+  pr-data.sh feature-branch
+  pr-data.sh --format=raw
+EOF
+}
+
+get_pr_data() {
+    local pr_ref="${1:-}"
+    local actionable="false"
+    FORMAT="${DEFAULT_FORMAT}"
+
+    # Parse arguments
+    local args=()
+    for arg in "$@"; do
+        case "$arg" in
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            --actionable)
+                actionable="true"
+                ;;
+            --format=*)
+                FORMAT="${arg#--format=}"
+                ;;
+            --format)
+                # Will be handled by next iteration
+                ;;
+            *)
+                if [ -z "$pr_ref" ] || [ "$pr_ref" = "--format" ]; then
+                    pr_ref="$arg"
+                fi
+                ;;
+        esac
+    done
+
+    # Resolve PR number
+    local pr_num
+    pr_num=$(resolve_pr_number "$pr_ref") || exit 1
+
+    # Get repo info
+    local repo_info
+    repo_info=$(get_repo_info) || exit 1
+    local owner repo
+    owner=$(get_owner "$repo_info")
+    repo=$(get_repo "$repo_info")
+
+    # GraphQL query for PR data
+    local query='
+query($owner: String!, $repo: String!, $pr: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      number
+      title
+      headRefName
+      files(first: 100) {
+        nodes { path }
+      }
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first: 10) {
+            nodes {
+              author { login }
+              body
+              url
+            }
+          }
+        }
+      }
+      comments(first: 50) {
+        nodes {
+          id
+          author { login }
+          body
+          url
+          createdAt
+        }
+      }
+    }
+  }
+}'
+
+    local result
+    result=$(gh_graphql "$query" -F owner="$owner" -F repo="$repo" -F pr="$pr_num") || exit 1
+
+    # Apply format
+    local output
+    case "$FORMAT" in
+        raw)
+            output=$(echo "$result")
+            ;;
+        safe|*)
+            output=$(echo "$result" | jq '{
+                number: .repository.pullRequest.number,
+                title: (.repository.pullRequest.title // ""),
+                branch: (.repository.pullRequest.headRefName // ""),
+                files: [.repository.pullRequest.files.nodes[].path],
+                threads: [.repository.pullRequest.reviewThreads.nodes[] | {
+                    id: .id,
+                    is_resolved: .isResolved,
+                    is_outdated: .isOutdated,
+                    path: (.path // ""),
+                    line: (.line // null),
+                    source: "inline",
+                    comments: [.comments.nodes[] | {
+                        author: (.author.login // ""),
+                        body: (.body // ""),
+                        url: (.url // ""),
+                        # Extract numeric ID from URL for post-reply
+                        reply_id: ((.url // "") | capture("r(?<id>[0-9]+)$") | .id // null)
+                    }]
+                }],
+                comments: [.repository.pullRequest.comments.nodes[] | {
+                    id: .id,
+                    author: (.author.login // ""),
+                    body: (.body // ""),
+                    url: (.url // ""),
+                    created_at: (.createdAt // ""),
+                    source: "pr-level"
+                }]
+            }')
+            ;;
+    esac
+
+    # Apply actionable filter (unresolved non-outdated threads, no bot comments)
+    if [ "$actionable" = "true" ] && [ "$FORMAT" != "raw" ]; then
+        output=$(echo "$output" | jq '{
+            number,
+            title,
+            branch,
+            files,
+            threads: [.threads[] | select(.is_resolved == false and .is_outdated == false) | {
+                id, path, line, source,
+                comments: [.comments[] | select(.author | IN("github-actions", "github-actions[bot]", "dependabot", "dependabot[bot]", "codecov", "codecov[bot]", "claude[bot]") | not)]
+            } | select(.comments | length > 0)],
+            comments: [.comments[] | select(.author | IN("github-actions", "github-actions[bot]", "dependabot", "dependabot[bot]", "codecov", "codecov[bot]") | not)]
+        }')
+    fi
+
+    echo "$output"
+}
+
+# Main
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+    show_help
+    exit 0
+fi
+
+get_pr_data "$@"

@@ -1,0 +1,379 @@
+#!/bin/bash
+# Portable git worktree manager
+# Usage: worktree create|list|remove|cleanup|path|exists|check|push [ID] [options]
+#
+# Layout: project/main (repo) + project/trees/{id} (worktrees)
+# Config: reads .env.local for optional settings (see below)
+#
+# .env.local config vars:
+#   WORKTREE_DEFAULT_BRANCH  - default branch name (auto-detected if unset, fallback: main)
+#   WORKTREE_SYMLINKS        - space-separated paths to symlink from main into worktrees
+#   WORKTREE_COPIES          - space-separated paths to copy from main into worktrees
+#   BOT_NAME                 - git user.name for worktree commits
+#   BOT_EMAIL                - git user.email for worktree commits
+#   BOT_SIGNING_KEY          - SSH signing key path
+#   BOT_REMOTE_NAME          - remote name for push (default: origin)
+#   BOT_REMOTE_URL           - URL for bot remote (added on create if set)
+
+set -euo pipefail
+
+# Resolve PROJECT_ROOT via git (works at any depth, inside worktrees too)
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [[ -z "$PROJECT_ROOT" ]]; then
+  echo "Error: Not inside a git repository" >&2
+  exit 1
+fi
+
+# If inside a worktree, resolve to the main repo root
+_git_common_dir=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null)
+if [[ "$_git_common_dir" != ".git" && -n "$_git_common_dir" ]]; then
+  PROJECT_ROOT="$(cd "$PROJECT_ROOT" && cd "$(dirname "$_git_common_dir")" && pwd)"
+fi
+
+# Load config from .env.local (optional — API keys, bot identity, symlink config)
+ENV_FILE="$PROJECT_ROOT/.env.local"
+[[ -f "$ENV_FILE" ]] && source "$ENV_FILE"
+
+# Layout: project/main (repo) + project/trees (worktrees)
+TREES_DIR="$(dirname "$PROJECT_ROOT")/trees"
+
+# Detect default branch (configurable, auto-detected, fallback: main)
+detect_default_branch() {
+  if [[ -n "${WORKTREE_DEFAULT_BRANCH:-}" ]]; then
+    echo "$WORKTREE_DEFAULT_BRANCH"
+    return
+  fi
+  local detected
+  detected=$(git -C "$PROJECT_ROOT" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+  echo "${detected:-main}"
+}
+DEFAULT_BRANCH="$(detect_default_branch)"
+
+# Fetch origin to update tracking refs. Never touches local branches.
+fetch_origin() {
+  git -C "$PROJECT_ROOT" fetch origin >/dev/null 2>&1 || true
+}
+
+worktree_path() {
+  echo "$TREES_DIR/$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+}
+
+# Symlink a path from main repo into worktree (handles tracked dirs with assume-unchanged)
+symlink_into_worktree() {
+  local src="$PROJECT_ROOT/$1"
+  local dst="$2/$1"
+
+  if [[ -f "$src" ]]; then
+    # File symlink
+    mkdir -p "$(dirname "$dst")"
+    ln -sf "$src" "$dst"
+  elif [[ -d "$src" ]]; then
+    # Directory symlink — if tracked by git, needs assume-unchanged to prevent staging issues
+    local git_dir="$PROJECT_ROOT/.git"
+    [[ -f "$git_dir" ]] && git_dir="$(cat "$git_dir" | sed 's/gitdir: //')"
+
+    if git -C "$2" ls-files "$1/" 2>/dev/null | grep -q .; then
+      # Tracked directory: exclude from index, replace with symlink
+      local info_exclude="$git_dir/info/exclude"
+      grep -qxF "$1" "$info_exclude" 2>/dev/null || echo "$1" >> "$info_exclude"
+      git -C "$2" ls-files "$1/" 2>/dev/null | \
+        xargs -r git -C "$2" update-index --assume-unchanged 2>/dev/null
+      rm -rf "$dst" 2>/dev/null
+    fi
+
+    mkdir -p "$(dirname "$dst")"
+    ln -sf "$src" "$dst"
+    git -C "$2" update-index --assume-unchanged "$1" 2>/dev/null || true
+  fi
+}
+
+# Remove symlinks created by 'create' from a worktree
+remove_symlinks() {
+  local wt="$1"
+  # Always clean .env.local
+  rm -f "$wt/.env.local" 2>/dev/null
+  # Clean configured symlinks
+  for path in ${WORKTREE_SYMLINKS:-}; do
+    rm -f "$wt/$path" 2>/dev/null
+    # Try to clean empty parent dirs
+    local parent="$(dirname "$wt/$path")"
+    while [[ "$parent" != "$wt" && "$parent" != "/" ]]; do
+      rmdir "$parent" 2>/dev/null || break
+      parent="$(dirname "$parent")"
+    done
+  done
+}
+
+# Apply all symlinks and copies to a worktree
+setup_worktree_links() {
+  local wt="$1"
+
+  # .env.local is always symlinked (fundamental — contains config for this tool)
+  [[ -f "$PROJECT_ROOT/.env.local" ]] && ln -sf "$PROJECT_ROOT/.env.local" "$wt/.env.local"
+
+  # Project-configured symlinks
+  for path in ${WORKTREE_SYMLINKS:-}; do
+    [[ -e "$PROJECT_ROOT/$path" ]] && symlink_into_worktree "$path" "$wt"
+  done
+
+  # Project-configured copies
+  for path in ${WORKTREE_COPIES:-}; do
+    if [[ -f "$PROJECT_ROOT/$path" ]]; then
+      mkdir -p "$(dirname "$wt/$path")"
+      cp "$PROJECT_ROOT/$path" "$wt/$path"
+    fi
+  done
+}
+
+case "${1:-}" in
+  create)
+    # Ensure worktreeConfig is enabled (required for per-worktree git config)
+    git -C "$PROJECT_ROOT" config extensions.worktreeConfig true 2>/dev/null || true
+
+    ISSUE="${2:?Error: create requires an issue ID}"
+    shift 2
+    BASE=""
+    BRANCH=""
+    PR=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --base) BASE="$2"; shift 2 ;;
+        --pr) PR="$2"; shift 2 ;;
+        *) BRANCH="$1"; shift ;;
+      esac
+    done
+    WT_PATH="$(worktree_path "$ISSUE")"
+
+    # 1. If worktree already exists at path, reuse it after updating
+    if [[ -d "$WT_PATH" ]] && git -C "$WT_PATH" rev-parse --git-dir &>/dev/null; then
+      fetch_origin
+      CURRENT_BRANCH=$(git -C "$WT_PATH" branch --show-current 2>/dev/null)
+      if [[ -n "$CURRENT_BRANCH" ]]; then
+        if ! git -C "$WT_PATH" rebase "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+          git -C "$WT_PATH" rebase --abort >/dev/null 2>&1 || true
+          echo "Error: Rebase onto origin/$DEFAULT_BRANCH failed for $WT_PATH (conflicts). Resolve manually or delete worktree." >&2
+          exit 1
+        fi
+      fi
+      # Refresh symlinks (rebase may have replaced symlinks with tracked content)
+      setup_worktree_links "$WT_PATH"
+      echo "$WT_PATH"
+      exit 0
+    fi
+
+    # 1b. Orphan directory exists (no .git pointer) — clean up before fresh create
+    if [[ -d "$WT_PATH" ]]; then
+      echo "Warning: Removing orphan directory at $WT_PATH (not a git worktree)" >&2
+      rm -rf "$WT_PATH"
+      git -C "$PROJECT_ROOT" worktree prune 2>/dev/null || true
+    fi
+
+    # 2. If --pr specified, look up the branch from the PR
+    if [[ -n "$PR" ]] && command -v gh &>/dev/null; then
+      BASE=$(gh pr view "$PR" --json headRefName -q .headRefName 2>/dev/null)
+      if [[ -z "$BASE" ]]; then
+        echo "Error: Could not find branch for PR #$PR" >&2
+        exit 1
+      fi
+    fi
+
+    # 3. Auto-detect: check if PR exists with expected branch patterns
+    if [[ -z "$BASE" ]] && command -v gh &>/dev/null; then
+      ISSUE_LOWER=$(echo "$ISSUE" | tr '[:upper:]' '[:lower:]')
+      USER_BRANCH="$ISSUE_LOWER"
+      DETECTED_PR=$(gh pr list --head "$USER_BRANCH" --json number -q '.[0].number' 2>/dev/null)
+      if [[ -n "$DETECTED_PR" ]]; then
+        BASE="$USER_BRANCH"
+      elif [[ -n "${BOT_NAME:-}" ]]; then
+        BOT_BRANCH="$BOT_NAME/$ISSUE_LOWER"
+        DETECTED_PR=$(gh pr list --head "$BOT_BRANCH" --json number -q '.[0].number' 2>/dev/null)
+        if [[ -n "$DETECTED_PR" ]]; then
+          BASE="$BOT_BRANCH"
+        fi
+      fi
+    fi
+
+    if [[ -n "$BASE" ]]; then
+      # Check if worktree already exists on this branch
+      EXISTING_WT=$(git -C "$PROJECT_ROOT" worktree list --porcelain | grep -B2 "branch refs/heads/$BASE$" | grep "^worktree " | cut -d' ' -f2)
+      if [[ -n "$EXISTING_WT" ]]; then
+        echo "$EXISTING_WT"
+        exit 0
+      fi
+      git -C "$PROJECT_ROOT" fetch origin "$BASE" >/dev/null 2>&1 || true
+      git -C "$PROJECT_ROOT" worktree add --track -b "$BASE" "$WT_PATH" "origin/$BASE" >/dev/null 2>&1 || \
+        git -C "$PROJECT_ROOT" worktree add "$WT_PATH" "$BASE" >/dev/null 2>&1
+    else
+      fetch_origin
+      BRANCH="${BRANCH:-$(echo "$ISSUE" | tr '[:upper:]' '[:lower:]')}"
+      git -C "$PROJECT_ROOT" worktree add --no-track -b "$BRANCH" "$WT_PATH" "origin/$DEFAULT_BRANCH" >/dev/null 2>&1
+    fi
+
+    # Set up symlinks, copies, and bot config
+    mkdir -p "$TREES_DIR"
+    setup_worktree_links "$WT_PATH"
+
+    # Add bot remote for agent pushes (if configured)
+    [[ -n "${BOT_REMOTE_NAME:-}" && -n "${BOT_REMOTE_URL:-}" ]] && \
+      git -C "$WT_PATH" remote add "$BOT_REMOTE_NAME" "$BOT_REMOTE_URL" 2>/dev/null || true
+
+    # Set agent git identity (if configured, requires extensions.worktreeConfig=true)
+    if [[ -n "${BOT_NAME:-}" ]]; then
+      git -C "$WT_PATH" config --worktree user.name "$BOT_NAME"
+      git -C "$WT_PATH" config --worktree user.email "${BOT_EMAIL:-}"
+      [[ -n "${BOT_SIGNING_KEY:-}" ]] && {
+        git -C "$WT_PATH" config --worktree gpg.format ssh
+        git -C "$WT_PATH" config --worktree user.signingkey "$BOT_SIGNING_KEY"
+        git -C "$WT_PATH" config --worktree commit.gpgsign true
+      }
+    fi
+    echo "$WT_PATH"
+    ;;
+
+  list)
+    git -C "$PROJECT_ROOT" worktree list
+    ;;
+
+  remove)
+    ARG="${2:?Error: remove requires an issue ID or path}"
+    # Accept either issue ID or direct path
+    if [[ "$ARG" == */* ]]; then
+      WT_PATH="$ARG"
+    else
+      WT_PATH="$(worktree_path "$ARG")"
+    fi
+    # Auto-relocate if cwd is inside the worktree being removed
+    WT_REAL="$(cd "$WT_PATH" 2>/dev/null && pwd -P)" || WT_REAL=""
+    CWD_REAL="$(pwd -P)"
+    if [[ -n "$WT_REAL" && "$CWD_REAL" == "$WT_REAL"* ]]; then
+      cd "$PROJECT_ROOT"
+      echo "Relocated cwd to $PROJECT_ROOT" >&2
+    fi
+    BRANCH=""
+    if [[ -d "$WT_PATH" ]]; then
+      BRANCH=$(git -C "$WT_PATH" branch --show-current 2>/dev/null)
+      remove_symlinks "$WT_PATH"
+      git -C "$PROJECT_ROOT" worktree remove --force "$WT_PATH"
+      # Safety net: remove directory if git left it behind
+      [[ -d "$WT_PATH" ]] && rm -rf "$WT_PATH"
+    fi
+    git -C "$PROJECT_ROOT" worktree prune
+    # Only delete local branch if merged (branch -d checks this)
+    [[ -n "$BRANCH" ]] && git -C "$PROJECT_ROOT" branch -d "$BRANCH" 2>/dev/null
+    echo "Removed: $WT_PATH"
+    if [[ -n "$WT_REAL" && "$CWD_REAL" == "$WT_REAL"* ]]; then
+      echo "" >&2
+      echo "Warning: Session cwd was inside deleted worktree. Start a new session from:" >&2
+      echo "  $PROJECT_ROOT" >&2
+    fi
+    ;;
+
+  cleanup)
+    git -C "$PROJECT_ROOT" fetch --prune origin
+    for wt in $(git -C "$PROJECT_ROOT" worktree list --porcelain | grep "^worktree " | grep -v "$PROJECT_ROOT$" | cut -d' ' -f2); do
+      BRANCH=$(git -C "$wt" branch --show-current 2>/dev/null)
+      if [[ -n "$BRANCH" ]] && git -C "$PROJECT_ROOT" branch -d "$BRANCH" 2>/dev/null; then
+        remove_symlinks "$wt"
+        git -C "$PROJECT_ROOT" worktree remove --force "$wt" 2>/dev/null && echo "Cleaned: $wt"
+        [[ -d "$wt" ]] && rm -rf "$wt"
+      fi
+    done
+    ;;
+
+  path)
+    worktree_path "${2:?Error: path requires an issue ID}"
+    ;;
+
+  exists)
+    WT_PATH="$(worktree_path "${2:?Error: exists requires an issue ID}")"
+    [[ -d "$WT_PATH" ]] && echo "true" || echo "false"
+    ;;
+
+  check)
+    UNCOMMITTED="false"
+    UNPUSHED="false"
+    UNPUSHED_LIST=""
+    if ! git -C "$PROJECT_ROOT" diff --quiet HEAD 2>/dev/null || ! git -C "$PROJECT_ROOT" diff --cached --quiet HEAD 2>/dev/null; then
+      UNCOMMITTED="true"
+    fi
+    UNPUSHED_COMMITS=$(git -C "$PROJECT_ROOT" log "origin/$DEFAULT_BRANCH..$DEFAULT_BRANCH" --oneline 2>/dev/null)
+    if [[ -n "$UNPUSHED_COMMITS" ]]; then
+      UNPUSHED="true"
+      UNPUSHED_LIST=$(echo "$UNPUSHED_COMMITS" | jq -R -s -c 'split("\n") | map(select(. != ""))')
+    fi
+    echo "{\"uncommitted\": $UNCOMMITTED, \"unpushed\": $UNPUSHED, \"unpushed_commits\": ${UNPUSHED_LIST:-[]}}"
+    ;;
+
+  push)
+    if [[ "${2:-}" == "--help" || "${2:-}" == "-h" ]]; then
+      echo "Usage: $0 push [ID|/path] [--set-upstream|-u] [--no-rebase]"
+      echo ""
+      echo "Push worktree branch to remote. Auto-rebases onto origin/$DEFAULT_BRANCH first."
+      echo "Uses BOT_REMOTE_NAME from .env.local if set, otherwise falls back to origin."
+      echo ""
+      echo "Options:"
+      echo "  -u, --set-upstream    Set upstream tracking branch"
+      echo "  --no-rebase           Skip auto-rebase"
+      exit 0
+    fi
+    ARG="${2:-}"
+    SET_UPSTREAM=""
+    AUTO_REBASE=true
+    shift 2 || shift || true
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        -u|--set-upstream) SET_UPSTREAM="-u"; shift ;;
+        --no-rebase) AUTO_REBASE=false; shift ;;
+        *) shift ;;
+      esac
+    done
+
+    if [[ -z "$ARG" ]]; then
+      WT_PATH="$PWD"
+    elif [[ "$ARG" == */* ]]; then
+      WT_PATH="$ARG"
+    else
+      WT_PATH="$(worktree_path "$ARG")"
+    fi
+
+    if [[ ! -d "$WT_PATH/.git" && ! -f "$WT_PATH/.git" ]]; then
+      echo "Error: Not a git worktree: $WT_PATH" >&2
+      exit 1
+    fi
+
+    REMOTE="${BOT_REMOTE_NAME:-origin}"
+    if ! git -C "$WT_PATH" remote get-url "$REMOTE" >/dev/null 2>&1; then
+      echo "Warning: Remote '$REMOTE' not found, falling back to origin" >&2
+      REMOTE="origin"
+    fi
+
+    if [[ "$AUTO_REBASE" == true ]]; then
+      git -C "$PROJECT_ROOT" fetch origin >/dev/null 2>&1 || true
+      CURRENT_BRANCH=$(git -C "$WT_PATH" branch --show-current 2>/dev/null)
+      if [[ -n "$CURRENT_BRANCH" && "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" ]]; then
+        if ! git -C "$WT_PATH" rebase "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+          git -C "$WT_PATH" rebase --abort >/dev/null 2>&1 || true
+          echo "Error: Rebase onto origin/$DEFAULT_BRANCH failed (conflicts). Push with --no-rebase or resolve manually." >&2
+          exit 1
+        fi
+      fi
+    fi
+
+    CURRENT_BRANCH=$(git -C "$WT_PATH" branch --show-current 2>/dev/null)
+    if [[ -z "$SET_UPSTREAM" && -n "$CURRENT_BRANCH" ]]; then
+      UPSTREAM=$(git -C "$WT_PATH" config "branch.${CURRENT_BRANCH}.remote" 2>/dev/null || true)
+      [[ -z "$UPSTREAM" ]] && SET_UPSTREAM="-u"
+    fi
+
+    if [[ -n "$SET_UPSTREAM" ]]; then
+      git -C "$WT_PATH" push "$SET_UPSTREAM" "$REMOTE" "HEAD:refs/heads/${CURRENT_BRANCH}"
+    else
+      git -C "$WT_PATH" push "$REMOTE" HEAD
+    fi
+    ;;
+
+  *)
+    echo "Usage: $0 create|list|remove|cleanup|path|exists|check|push [ID|/path] [options]" >&2
+    exit 1
+    ;;
+esac

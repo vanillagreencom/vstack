@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# Wait for CI checks to complete, output only on completion or failure
+# Auto-retries transient infrastructure failures (max 1 retry)
+#
+# Uses JSON-based state detection to avoid false positives from stale checks
+# left by prior workflow runs (e.g., SKIPPED checks from defer-ci runs).
+#
+# Usage: ci-wait <PR#> [poll_interval] [max_wait]
+#
+# Environment:
+#   GIT_HOST_CLI  - (optional) Path to git host CLI script for enriched output
+set -euo pipefail
+
+PR_NUM="${1:?Usage: ci-wait <PR#> [poll_interval] [max_wait]}"
+POLL_INTERVAL="${2:-15}"
+MAX_WAIT="${3:-600}"
+
+# --- Pre-flight: check PR is mergeable (CI won't trigger if conflicting) ---
+merge_state=$(gh pr view "$PR_NUM" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null || echo "UNKNOWN")
+case "$merge_state" in
+  DIRTY|CONFLICTING)
+    echo "PR #$PR_NUM has merge conflicts (state: $merge_state)" >&2
+    echo "CI will not trigger until conflicts are resolved." >&2
+    echo "Rebase onto main and force-push to fix." >&2
+    exit 1
+    ;;
+  UNKNOWN)
+    echo "Could not determine merge state, continuing..." >&2
+    ;;
+esac
+
+# Patterns indicating transient infrastructure failures (safe to retry)
+TRANSIENT_PATTERNS=(
+  "another process is currently installing"
+  "Could not install"
+  "Installation failed"
+  "network timeout"
+  "runner error"
+  "ETIMEDOUT"
+  "ECONNRESET"
+  "rate limit"
+)
+
+retries=0
+max_retries=1
+no_checks_count=0
+max_no_checks=4  # Give CI ~60s to register checks before failing
+
+# Guard against stale-check race condition: when called right after removing
+# defer-ci label, old run checks (SUCCESS/SKIPPED) may be the only ones visible.
+# Only declare "passed" after we've seen at least one check go through
+# IN_PROGRESS/PENDING, proving a fresh run was observed.
+seen_in_progress=false
+stale_count=0
+max_stale=6  # ~90s of only completed/skipped before assuming genuinely done
+
+is_transient_failure() {
+  local run_id="$1"
+  local logs
+  logs=$(gh run view "$run_id" --log-failed 2>/dev/null | head -200) || return 1
+
+  for pattern in "${TRANSIENT_PATTERNS[@]}"; do
+    if echo "$logs" | grep -qi "$pattern"; then
+      echo "Detected transient failure: $pattern" >&2
+      return 0
+    fi
+  done
+  return 1
+}
+
+get_failed_run_id() {
+  local pr="$1"
+  gh pr checks "$pr" --json name,state,link 2>/dev/null | \
+    jq -r '.[] | select(.state == "FAILURE") | .link' | \
+    head -1 | grep -oE '[0-9]+$' || echo ""
+}
+
+elapsed=0
+while [ $elapsed -lt $MAX_WAIT ]; do
+  # Use JSON output for reliable state detection
+  checks_json=$(gh pr checks "$PR_NUM" --json name,state 2>/dev/null) || true
+
+  # Handle no checks / empty response
+  if [ -z "$checks_json" ] || [ "$checks_json" = "[]" ] || [ "$checks_json" = "null" ]; then
+    no_checks_count=$((no_checks_count + 1))
+    if [ $no_checks_count -ge $max_no_checks ]; then
+      echo "No CI checks after ${elapsed}s" >&2
+      echo "Possible causes: merge conflicts, paths-ignore filtering, or webhook delay." >&2
+      merge_state=$(gh pr view "$PR_NUM" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null || echo "UNKNOWN")
+      if [ "$merge_state" = "DIRTY" ] || [ "$merge_state" = "CONFLICTING" ]; then
+        echo "PR has merge conflicts (state: $merge_state) — CI will not trigger." >&2
+      fi
+      exit 1
+    fi
+    sleep "$POLL_INTERVAL"
+    elapsed=$((elapsed + POLL_INTERVAL))
+    continue
+  fi
+
+  # Reset no-checks counter once we see checks
+  no_checks_count=0
+
+  # Count checks by state
+  pending_count=$(echo "$checks_json" | jq '[.[] | select(.state == "PENDING" or .state == "IN_PROGRESS" or .state == "QUEUED")] | length')
+  failed_count=$(echo "$checks_json" | jq '[.[] | select(.state == "FAILURE")] | length')
+  success_count=$(echo "$checks_json" | jq '[.[] | select(.state == "SUCCESS")] | length')
+
+  # Track if we've observed a fresh run (guards against stale-check race)
+  if [ "$pending_count" -gt 0 ]; then
+    seen_in_progress=true
+    stale_count=0
+  fi
+
+  # Check for failure (only when all checks have settled)
+  if [ "$failed_count" -gt 0 ] && [ "$pending_count" -eq 0 ]; then
+    failed_run=$(get_failed_run_id "$PR_NUM")
+
+    # Try auto-retry for transient failures
+    if [ -n "$failed_run" ] && [ $retries -lt $max_retries ] && is_transient_failure "$failed_run"; then
+      echo "Retrying transient failure (attempt $((retries + 1))/$max_retries)..." >&2
+      gh run rerun "$failed_run" --failed 2>/dev/null || true
+      retries=$((retries + 1))
+      seen_in_progress=false  # Reset — rerun will produce new checks
+      sleep 10
+      continue
+    fi
+
+    echo "CI failed:"
+    echo "$checks_json" | jq -r '.[] | select(.state == "FAILURE") | "  \(.name): FAILED"'
+    exit 1
+  fi
+
+  # Check if all complete (no pending)
+  if [ "$pending_count" -eq 0 ] && [ "$success_count" -gt 0 ]; then
+    if [ "$seen_in_progress" = true ]; then
+      # We watched checks go from in-progress to complete — reliable
+      echo "CI passed"
+      exit 0
+    fi
+    # Only seeing completed/skipped checks but never saw in-progress.
+    # Could be stale checks from prior run, or CI already completed before
+    # we started watching. Use stale counter to distinguish.
+    stale_count=$((stale_count + 1))
+    if [ "$stale_count" -ge "$max_stale" ]; then
+      # Waited long enough for new checks to appear — genuinely complete
+      echo "CI passed"
+      exit 0
+    fi
+  fi
+
+  sleep "$POLL_INTERVAL"
+  elapsed=$((elapsed + POLL_INTERVAL))
+done
+
+echo "CI timeout after ${MAX_WAIT}s"
+gh pr checks "$PR_NUM"
+exit 1

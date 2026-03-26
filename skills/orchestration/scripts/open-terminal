@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Open a new terminal in a directory, optionally running a command.
+# Supports: tmux (--tmux), Ghostty (default on supported platforms)
+#
+# Usage: open-terminal <directory> [--cmd <command>] [--title <title>] [--tmux [window-name]]
+#
+# Examples:
+#   open-terminal /path/to/worktree
+#   open-terminal /path/to/worktree --title ISSUE-123 --cmd "some-command"
+#   open-terminal /path/to/worktree --tmux ISSUE-123 --title ISSUE-123 --cmd "some-command"
+
+set -euo pipefail
+
+DIR=""
+CMD=""
+TMUX_MODE=false
+TMUX_NAME=""
+TITLE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --cmd) CMD="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --tmux)
+      TMUX_MODE=true
+      # Next arg is window name if it doesn't start with --
+      if [[ $# -gt 1 && "$2" != --* ]]; then
+        TMUX_NAME="$2"; shift
+      fi
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: open-terminal <directory> [--cmd <command>] [--title <title>] [--tmux [window-name]]"
+      exit 0
+      ;;
+    *) DIR="$1"; shift ;;
+  esac
+done
+
+if [[ -z "$DIR" ]]; then
+  echo "Error: directory required" >&2
+  exit 1
+fi
+
+if [[ ! -d "$DIR" ]]; then
+  echo "Error: directory does not exist: $DIR" >&2
+  exit 1
+fi
+
+# Build the shell command to execute in the new terminal
+if [[ -n "$CMD" ]]; then
+  SHELL_CMD="cd '$DIR' && $CMD"
+else
+  SHELL_CMD="cd '$DIR'; exec \$SHELL"
+fi
+
+# Tmux mode
+if [[ "$TMUX_MODE" == true ]]; then
+  if [[ -z "${TMUX:-}" ]]; then
+    echo "Error: not inside a tmux session" >&2
+    exit 1
+  fi
+  NAME_ARGS=()
+  if [[ -n "$TMUX_NAME" ]]; then
+    NAME_ARGS=(-n "$TMUX_NAME")
+  fi
+  # Append after the last window so we don't shuffle existing indices
+  LAST_IDX=$(tmux list-windows -F '#{window_index}' | tail -1)
+  tmux new-window -a -t ":${LAST_IDX}" "${NAME_ARGS[@]}" -c "$DIR"
+  tmux send-keys "clear" Enter
+  if [[ -n "$CMD" ]]; then
+    tmux send-keys "$CMD" Enter
+  fi
+  echo "Opened tmux window${TMUX_NAME:+ '$TMUX_NAME'} in $DIR"
+  exit 0
+fi
+
+# GUI terminal mode — auto-detect available terminal emulator
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  if [[ -d "/Applications/Ghostty.app" ]]; then
+    GHOSTTY_MAC_ARGS=(--working-directory="$DIR")
+    [[ -n "$TITLE" ]] && GHOSTTY_MAC_ARGS+=(--title="$TITLE")
+    if [[ -n "$CMD" ]]; then
+      open -na "Ghostty.app" --args "${GHOSTTY_MAC_ARGS[@]}" --command="bash -c '$CMD'"
+    else
+      open -na "Ghostty.app" --args "${GHOSTTY_MAC_ARGS[@]}"
+    fi
+  elif command -v open &>/dev/null; then
+    # Fallback: default Terminal.app
+    if [[ -n "$CMD" ]]; then
+      osascript -e "tell application \"Terminal\" to do script \"cd '$DIR' && $CMD\""
+    else
+      open -a Terminal "$DIR"
+    fi
+  else
+    echo "Error: no supported terminal emulator found on macOS" >&2
+    exit 1
+  fi
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+  if command -v ghostty &>/dev/null; then
+    GHOSTTY_ARGS=(--working-directory="$DIR")
+    [[ -n "$TITLE" ]] && GHOSTTY_ARGS+=(--title="$TITLE")
+    if [[ -n "$CMD" ]]; then
+      setsid ghostty "${GHOSTTY_ARGS[@]}" -e bash -c "$SHELL_CMD" </dev/null &>/dev/null &
+    else
+      setsid ghostty "${GHOSTTY_ARGS[@]}" </dev/null &>/dev/null &
+    fi
+  elif command -v xdg-terminal-exec &>/dev/null; then
+    # freedesktop default terminal
+    setsid xdg-terminal-exec bash -c "$SHELL_CMD" </dev/null &>/dev/null &
+  elif command -v xterm &>/dev/null; then
+    XTERM_ARGS=()
+    [[ -n "$TITLE" ]] && XTERM_ARGS+=(-T "$TITLE")
+    setsid xterm "${XTERM_ARGS[@]}" -e bash -c "$SHELL_CMD" </dev/null &>/dev/null &
+  else
+    echo "Error: no supported terminal emulator found (tried: ghostty, xdg-terminal-exec, xterm)" >&2
+    exit 1
+  fi
+else
+  echo "Error: unsupported platform: $OSTYPE" >&2
+  exit 1
+fi
+
+echo "Opened terminal in $DIR"

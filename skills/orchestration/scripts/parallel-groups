@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# Manage parallel work groups — locally computed analysis, not issue tracker data.
+# Storage: $ORCH_CACHE_DIR/parallel-groups.json (shared via worktree symlink)
+#
+# Usage:
+#   parallel-groups read                  # Non-stale safe groups (JSON array)
+#   parallel-groups write '<json>'        # Append group to file
+#   parallel-groups clear [--group N]     # Remove all or specific group
+#   parallel-groups lookup ISSUE-XXX      # Return group_id or empty
+#   parallel-groups needs-refresh ID1 ID2 # Exit 0 if refresh needed, 1 if fresh
+#
+# Environment:
+#   ORCH_CACHE_DIR  - Cache directory (default: .cache/orchestration)
+#   ISSUE_CLI       - (optional) Path to issue tracker CLI for cache cross-referencing
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve project root, handling worktree paths
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+_git_common_dir=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null || echo "")
+if [[ "$_git_common_dir" != ".git" && -n "$_git_common_dir" ]]; then
+  PROJECT_ROOT="$(dirname "$_git_common_dir")"
+fi
+
+CACHE_DIR="${ORCH_CACHE_DIR:-$PROJECT_ROOT/.cache/orchestration}"
+GROUPS_FILE="$CACHE_DIR/parallel-groups.json"
+ISSUES_FILE="$CACHE_DIR/issues.json"
+LOCK_FILE="$CACHE_DIR/parallel-groups.json.lock"
+
+ensure_file() {
+  mkdir -p "$CACHE_DIR"
+  [[ -f "$GROUPS_FILE" ]] || echo '{"groups":[]}' > "$GROUPS_FILE"
+}
+
+# File locking for concurrent write safety
+with_lock() {
+  local fd
+  exec {fd}>"$LOCK_FILE"
+  flock -w 5 "$fd" || { echo "Error: could not acquire lock" >&2; exit 1; }
+  "$@"
+  flock -u "$fd"
+  exec {fd}>&-
+}
+
+# Check staleness: cross-reference issue_fingerprints against issues.json updatedAt
+# $1: groups JSON, $2: verdict filter ("safe" = default for read, "all" = for needs-refresh)
+filter_stale() {
+  local groups_json="$1"
+  local verdict_filter="${2:-safe}"
+  if [[ ! -f "$ISSUES_FILE" ]]; then
+    echo "[]"
+    return
+  fi
+  jq -c --arg vf "$verdict_filter" --slurpfile issues "$ISSUES_FILE" '
+    ($issues[0] | if type == "array" then . else [.] end |
+      [.[] | {(.identifier): .updatedAt}] | add // {}) as $current |
+    [.groups[] |
+      select(if $vf == "all" then true else .verdict == "safe" end) |
+      select(
+        ([.issue_fingerprints | to_entries[] |
+          ($current[.key] // null) as $cur |
+          if $cur == null then false      # issue removed from cache
+          elif $cur != .value then false   # issue updated since analysis
+          else true end
+        ] | all)
+        and
+        (if .children_fingerprints then
+          [.children_fingerprints | to_entries[] |
+            ($current[.key] // null) as $cur |
+            if $cur == null then false
+            elif $cur != .value then false
+            else true end
+          ] | all
+        else true end)
+      )
+    ]
+  ' <<< "$groups_json"
+}
+
+next_group_id() {
+  local groups_json="$1"
+  jq '[.groups[].group_id] | (max // 0) + 1' <<< "$groups_json"
+}
+
+cmd_read() {
+  local verdict_filter="safe"
+  [[ "${1:-}" == "--all" ]] && verdict_filter="all"
+  ensure_file
+  local data
+  data=$(cat "$GROUPS_FILE")
+  filter_stale "$data" "$verdict_filter"
+}
+
+cmd_write() {
+  local input="$1"
+  ensure_file
+
+  _do_write() {
+    local data
+    data=$(cat "$GROUPS_FILE")
+    local gid
+    gid=$(next_group_id "$data")
+
+    # Build group with auto-assigned group_id
+    local new_group
+    new_group=$(jq -c --argjson gid "$gid" '. + {group_id: $gid}' <<< "$input")
+
+    # Append to groups array
+    jq --argjson g "$new_group" '.groups += [$g]' "$GROUPS_FILE" > "$GROUPS_FILE.tmp" && \
+      mv "$GROUPS_FILE.tmp" "$GROUPS_FILE"
+
+    echo "$gid"
+  }
+
+  with_lock _do_write
+}
+
+cmd_clear() {
+  ensure_file
+  local group_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --group) group_id="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  _do_clear() {
+    if [[ -n "$group_id" ]]; then
+      jq --argjson gid "$group_id" '.groups |= map(select(.group_id != $gid))' \
+        "$GROUPS_FILE" > "$GROUPS_FILE.tmp" && mv "$GROUPS_FILE.tmp" "$GROUPS_FILE"
+    else
+      echo '{"groups":[]}' > "$GROUPS_FILE"
+    fi
+  }
+
+  with_lock _do_clear
+}
+
+cmd_lookup() {
+  local issue="$1"
+  ensure_file
+  local data
+  data=$(cat "$GROUPS_FILE")
+  local fresh
+  fresh=$(filter_stale "$data")
+  # Return group_id of first non-stale group containing the issue, or empty
+  jq -r --arg id "$issue" '[.[] | select(.issues[] == $id) | .group_id] | first // empty' <<< "$fresh"
+}
+
+cmd_needs_refresh() {
+  local -a candidates=()
+  for arg in "$@"; do
+    candidates+=("$arg")
+  done
+
+  # Need at least 2 candidates for parallelization
+  if [[ ${#candidates[@]} -lt 2 ]]; then
+    echo "skip: <2 issues"
+    return 1
+  fi
+
+  ensure_file
+  local data
+  data=$(cat "$GROUPS_FILE")
+
+  # Build JSON array of candidates
+  local cands_json
+  cands_json=$(printf '%s\n' "${candidates[@]}" | jq -R . | jq -s -c .)
+
+  # Check if every candidate exists in any group's issues or children_fingerprints
+  # (ignoring fingerprint staleness). Only new issues trigger a refresh.
+  local all_covered
+  all_covered=$(jq -n --argjson cands "$cands_json" --argjson data "$data" '
+    ([$data.groups[]? | (.issues[]?, (.children_fingerprints // {} | keys[]))] | unique) as $covered |
+    [$cands[] | select(. as $c | $covered | index($c) | not)] | length == 0
+  ')
+
+  if [[ "$all_covered" == "true" ]]; then
+    echo "fresh: all ${#candidates[@]} covered"
+    return 1
+  fi
+
+  # List uncovered (never-analyzed) issues
+  local uncovered
+  uncovered=$(jq -r --argjson cands "$cands_json" --argjson data "$data" '
+    ([$data.groups[]? | (.issues[]?, (.children_fingerprints // {} | keys[]))] | unique) as $covered |
+    [$cands[] | select(. as $c | $covered | index($c) | not)] | join(", ")
+  ' <<< 'null')
+  echo "new: $uncovered not analyzed"
+  return 0
+}
+
+case "${1:-}" in
+  read) shift; cmd_read "$@" ;;
+  write) cmd_write "${2:?'JSON argument required'}" ;;
+  clear) shift; cmd_clear "$@" ;;
+  lookup) cmd_lookup "${2:?'Issue ID required'}" ;;
+  needs-refresh) shift; cmd_needs_refresh "$@" ;;
+  --help|-h)
+    echo "Usage: parallel-groups read|write|clear|lookup|needs-refresh [args]"
+    echo ""
+    echo "Commands:"
+    echo "  read [--all]               Non-stale groups (default: safe only; --all: all verdicts)"
+    echo "  write '<json>'             Append group (auto-assigns group_id)"
+    echo "  clear [--group N]          Remove all or specific group"
+    echo "  lookup ISSUE-XXX           Return group_id or empty"
+    echo "  needs-refresh ID1 ID2      Exit 0 if refresh needed, 1 if fresh"
+    echo ""
+    echo "Environment:"
+    echo "  ORCH_CACHE_DIR  Cache directory (default: .cache/orchestration)"
+    echo "  ISSUE_CLI       Path to issue tracker CLI (optional)"
+    ;;
+  *)
+    echo "Usage: parallel-groups read|write|clear|lookup|needs-refresh [args]" >&2
+    exit 1
+    ;;
+esac

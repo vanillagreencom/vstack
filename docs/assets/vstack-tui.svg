@@ -1,0 +1,51 @@
+<svg width="1440" height="900" viewBox="0 0 1440 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1440" height="900" fill="#1F1E26"/>
+  <rect x="32" y="36" width="196" height="48" rx="6" fill="#22D3EE"/>
+  <text x="130" y="67" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" font-weight="700" fill="#111827">vstack</text>
+  <text x="268" y="68" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" font-weight="700" fill="#F3F4F6">Select packages to install</text>
+  <rect x="1035" y="36" width="280" height="34" rx="4" fill="#4B5563"/>
+  <text x="1050" y="58" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" font-weight="700" fill="#111827">repo: vanillagreencom/vstack ▾</text>
+  <text x="40" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" font-style="italic" fill="#6B7280">╰─ Flow</text>
+  <text x="180" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" font-weight="700" fill="#22D3EE">◆ Packages</text>
+  <text x="377" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#22D3EE">──</text>
+  <text x="436" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" font-weight="700" fill="#22D3EE">◆ Scope</text>
+  <text x="590" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#22D3EE">──</text>
+  <rect x="690" y="87" width="254" height="46" rx="4" fill="#F6C785"/>
+  <text x="817" y="118" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24" font-weight="700" fill="#111827">Harnesses</text>
+  <text x="980" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#374151">──</text>
+  <text x="1080" y="118" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#6B7280">◇ Method</text>
+  <line x1="0" y1="170.5" x2="1440" y2="170.5" stroke="#31323A"/>
+  <line x1="0" y1="312.5" x2="1440" y2="312.5" stroke="#31323A"/>
+  <line x1="0" y1="739.5" x2="1440" y2="739.5" stroke="#31323A"/>
+  <text x="42" y="386" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24" fill="#E795F5">▸</text>
+  <text x="96" y="392" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" font-weight="700" fill="#A78BFA">✓</text>
+  <text x="144" y="392" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" font-weight="700" fill="#E795F5">Claude Code</text>
+  <text x="425" y="392" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="26" font-style="italic" fill="#6B7280">detected</text>
+  <text x="660" y="392" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" fill="#A78BFA">selected</text>
+  <text x="196" y="450" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="24" fill="#7D7E86">Install to claude-code</text>
+  <text x="96" y="520" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" fill="#A78BFA">✓</text>
+  <text x="144" y="520" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" fill="#F3F4F6">OpenCode</text>
+  <text x="360" y="520" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="26" font-style="italic" fill="#6B7280">detected</text>
+  <text x="560" y="520" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" fill="#A78BFA">selected</text>
+  <text x="96" y="586" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" fill="#A78BFA">✓</text>
+  <text x="144" y="586" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" fill="#F3F4F6">Codex</text>
+  <text x="288" y="586" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="26" font-style="italic" fill="#6B7280">detected</text>
+  <text x="465" y="586" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="28" fill="#A78BFA">selected</text>
+  <text x="42" y="784" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" fill="#7D7E86">0 selected in tab, 0 total</text>
+  <text x="42" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#E795F5">↑↓</text>
+  <text x="82" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#7D7E86">navigate</text>
+  <text x="198" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#E795F5">tab</text>
+  <text x="246" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#7D7E86">switch tab</text>
+  <text x="402" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#E795F5">r</text>
+  <text x="420" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#7D7E86">repos</text>
+  <text x="514" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#E795F5">←</text>
+  <text x="538" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#7D7E86">back</text>
+  <text x="646" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#E795F5">enter</text>
+  <text x="714" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#7D7E86">toggle</text>
+  <text x="824" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#E795F5">a</text>
+  <text x="842" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#7D7E86">all</text>
+  <text x="914" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#E795F5">→</text>
+  <text x="938" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#7D7E86">next</text>
+  <text x="1028" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#E795F5">esc</text>
+  <text x="1072" y="828" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#7D7E86">quit</text>
+</svg>

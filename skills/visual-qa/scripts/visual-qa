@@ -1,0 +1,2264 @@
+#!/usr/bin/env bash
+#
+# visual-qa - Automated visual QA in isolated virtual display
+#
+# Launches app inside Xvfb (Linux) so the user's real display is untouched.
+# Provides primitives for Claude to drive interactions and capture screenshots.
+#
+# Location: scripts/visual-qa
+#
+# Usage: visual-qa <command> [args...]
+# Commands: setup start watch screenshot click double-click right-click
+#           drag mousedown mouseup move key type window-info map
+#           status doctor record baseline locate cursor-pos
+#           resize-pane assert tab-transfer maximize restore cleanup stop
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)"
+SESSION_FILE="${VISUAL_QA_SESSION:-/tmp/visual-qa-session.json}"
+
+# Load project-specific config if available
+# Config can override: VQA_APP_BINARY, VQA_BUILD_CMD, VQA_WINDOW_TITLE,
+# VQA_SCREENSHOT_ENV, VQA_LAYOUT_ENV, VQA_MAP_ENV, VQA_DEFAULT_LAYOUT_ENV
+_vqa_conf="${VQA_CONFIG:-${ROOT_DIR}/visual-qa.conf}"
+[[ -f "$_vqa_conf" ]] && source "$_vqa_conf"
+
+# Defaults (match original ht-app behavior for backward compat)
+VQA_APP_BINARY="${VQA_APP_BINARY:-$ROOT_DIR/target/debug/ht-app}"
+VQA_BUILD_CMD="${VQA_BUILD_CMD:-$VQA_BUILD_CMD --manifest-path $ROOT_DIR/Cargo.toml}"
+VQA_WINDOW_TITLE="${VQA_WINDOW_TITLE:-hyprtrade}"
+VQA_SCREENSHOT_ENV_KEY="${VQA_SCREENSHOT_ENV_KEY:-${VQA_SCREENSHOT_ENV_KEY}}"
+VQA_LAYOUT_ENV_KEY="${VQA_LAYOUT_ENV_KEY:-HT_LAYOUT_FIXTURE}"
+VQA_MAP_ENV_KEY="${VQA_MAP_ENV_KEY:-HT_VISUAL_QA_MAP_PATH}"
+VQA_DEFAULT_LAYOUT_ENV="${VQA_DEFAULT_LAYOUT_ENV:-${VQA_DEFAULT_LAYOUT_ENV}}"
+# Screenshots go to testdata/screenshots/<run-id>/ (gitignored).
+# Resolved lazily: session commands read from the session file; cmd_start generates fresh.
+SCREENSHOT_DIR=""
+
+# Resolve SCREENSHOT_DIR from session file or generate a new timestamped path.
+# Called by commands that need the directory — NOT at script init to avoid
+# computing (and later mkdir-ing) a path from a stale session that cmd_start will discard.
+_resolve_screenshot_dir() {
+    [[ -n "$SCREENSHOT_DIR" ]] && return 0
+    if [[ -z "${VISUAL_QA_SCREENSHOT_DIR:-}" ]] && [[ -f "$SESSION_FILE" ]]; then
+        SCREENSHOT_DIR="$(jq -r '.screenshot_dir // empty' "$SESSION_FILE" 2>/dev/null)"
+    fi
+    if [[ -z "$SCREENSHOT_DIR" ]]; then
+        local run_id="${VISUAL_QA_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
+        SCREENSHOT_DIR="${VISUAL_QA_SCREENSHOT_DIR:-$ROOT_DIR/testdata/screenshots/$run_id}"
+    fi
+}
+
+# Generate a fresh timestamped SCREENSHOT_DIR (ignores session/env overrides).
+_new_screenshot_dir() {
+    local run_id="${VISUAL_QA_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
+    SCREENSHOT_DIR="${VISUAL_QA_SCREENSHOT_DIR:-$ROOT_DIR/testdata/screenshots/$run_id}"
+}
+
+# --- Helpers ---
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+info() { echo "INFO: $*" >&2; }
+warn() { echo "WARN: $*" >&2; }
+
+# Cache session values to avoid re-parsing JSON on every command.
+# Cleared on start/stop; populated on first session_get call.
+_SESSION_CACHE=""
+
+session_get() {
+    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: tools/visual-qa start"
+    if [[ -z "$_SESSION_CACHE" ]]; then
+        _SESSION_CACHE=$(cat "$SESSION_FILE")
+    fi
+    echo "$_SESSION_CACHE" | jq -r --arg field "$1" '.[$field] // empty'
+}
+
+session_display() {
+    echo ":$(session_get display)"
+}
+
+require_session() {
+    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: tools/visual-qa start"
+    if [[ -z "$_SESSION_CACHE" ]]; then
+        _SESSION_CACHE=$(cat "$SESSION_FILE")
+    fi
+    local display
+    display=$(echo "$_SESSION_CACHE" | jq -r '.display // empty')
+    [[ -n "$display" ]] || die "Session file corrupt — missing display"
+}
+
+_wait_for_file() {
+    local path="$1" max_attempts="${2:-30}"
+    local attempt=0
+    while [[ $attempt -lt $max_attempts ]]; do
+        [[ -f "$path" ]] && return 0
+        sleep 0.1
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+_map_path() {
+    local path
+    path=$(session_get map_path)
+    [[ -n "$path" ]] || die "No live visual-qa map configured for this session"
+    echo "$path"
+}
+
+_map_json() {
+    require_session
+    local path
+    path=$(_map_path)
+    _wait_for_file "$path" 30 || die "Live visual-qa map not ready: $path"
+    cat "$path"
+}
+
+_round_int() {
+    awk -v value="$1" 'BEGIN { printf "%.0f\n", value }'
+}
+
+_clamp_int() {
+    local value="$1" min="$2" max="$3"
+    if [[ "$value" -lt "$min" ]]; then
+        echo "$min"
+    elif [[ "$value" -gt "$max" ]]; then
+        echo "$max"
+    else
+        echo "$value"
+    fi
+}
+
+_float_close_enough() {
+    local left="$1" right="$2" tolerance="${3:-8}"
+    awk -v left="$left" -v right="$right" -v tolerance="$tolerance" '
+    BEGIN {
+        diff = left - right
+        if (diff < 0) diff = -diff
+        exit(diff <= tolerance ? 0 : 1)
+    }'
+}
+
+_pane_matches_json() {
+    local title="$1"
+    _map_json | jq -c --arg title "$title" '
+        [.panes[] | select((.titles | index($title)) != null or .active_title == $title)]
+    '
+}
+
+_unique_pane_json() {
+    local title="$1"
+    local map_json
+    map_json=$(_map_json)
+
+    if [[ "$title" == Pane\(* ]]; then
+        local by_id
+        by_id=$(echo "$map_json" | jq -c --arg pane_id "$title" '[.panes[] | select(.pane_id == $pane_id)]')
+        if [[ "$(echo "$by_id" | jq 'length')" -eq 1 ]]; then
+            echo "$by_id" | jq -c '.[0]'
+            return 0
+        fi
+    fi
+
+    local matches count
+    matches=$(echo "$map_json" | jq -c --arg title "$title" '
+        [.panes[] | select((.titles | index($title)) != null or .active_title == $title)]
+    ')
+    count=$(echo "$matches" | jq 'length')
+
+    if [[ "$count" -eq 0 ]]; then
+        die "Pane not found in live map: \"$title\""
+    fi
+
+    if [[ "$count" -gt 1 ]]; then
+        die "Pane title is ambiguous in live map: \"$title\""
+    fi
+
+    echo "$matches" | jq -c '.[0]'
+}
+
+_pane_drop_target_json() {
+    local pane_spec="$1" region="$2"
+    local pane_json
+    pane_json=$(_unique_pane_json "$pane_spec")
+    echo "$pane_json" | jq -c --arg region "$region" '
+        .drop_targets[] | select(.name == $region)
+    '
+}
+
+_app_edge_target_json() {
+    local edge="$1"
+    _map_json | jq -c --arg name "edge-$edge" '.app_edge_targets[] | select(.name == $name)'
+}
+
+_center_of_rect() {
+    local rect_json="$1"
+    jq -r '[((.x + (.width / 2))|round), ((.y + (.height / 2))|round)] | @tsv' <<<"$rect_json"
+}
+
+_perform_tab_drag() {
+    local src_name="$1" drop_x="$2" drop_y="$3"
+    local src sx sy
+    src=$(cmd_locate "$src_name" 2>/dev/null) || die "Source tab not found: \"$src_name\""
+    sx=$(echo "$src" | cut -d' ' -f1); sy=$(echo "$src" | cut -d' ' -f2)
+
+    info "tab-drag: $src_name ($sx,$sy) → ($drop_x,$drop_y)"
+    _invalidate_ocr_cache
+    local platform display wid
+    platform=$(session_get platform)
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool windowfocus "$wid" 2>/dev/null || true
+            DISPLAY="$display" xdotool mousemove --window "$wid" "$sx" "$sy"
+            DISPLAY="$display" xdotool mousedown 1
+            sleep 0.1
+            DISPLAY="$display" xdotool mousemove --window "$wid" $((sx + (sx > drop_x ? -15 : 15))) "$sy"
+            sleep 0.1
+            DISPLAY="$display" xdotool mousemove --window "$wid" "$drop_x" "$drop_y"
+            sleep 0.3
+            DISPLAY="$display" xdotool mouseup 1
+            ;;
+        darwin)
+            cliclick "dd:$sx,$sy"
+            sleep 0.1
+            cliclick "dm:$drop_x,$drop_y"
+            sleep 0.3
+            cliclick "du:$drop_x,$drop_y"
+            ;;
+    esac
+    _invalidate_ocr_cache
+    sleep 0.3
+}
+
+wait_for_window() {
+    local display="$1" name="$2" max_attempts="${3:-20}"
+    local attempt=0
+    while [[ $attempt -lt $max_attempts ]]; do
+        local wid
+        wid=$(DISPLAY=":$display" xdotool search --name "$name" 2>/dev/null | head -1)
+        if [[ -n "$wid" ]]; then
+            echo "$wid"
+            return 0
+        fi
+        sleep 0.5
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+find_free_display() {
+    local d=90
+    while [[ $d -lt 200 ]]; do
+        if [[ ! -e "/tmp/.X${d}-lock" ]] && [[ ! -e "/tmp/.X11-unix/X${d}" ]]; then
+            echo "$d"
+            return 0
+        fi
+        d=$((d + 1))
+    done
+    die "No free display number found (checked :90-:199)"
+}
+
+# --- Commands ---
+
+cmd_setup() {
+    local os
+    os="$(uname -s)"
+    echo "Platform: $os"
+
+    local missing=()
+    local available=()
+    local install_pkgs=()
+
+    check_dep() {
+        local cmd_name="$1"
+        local display_name="$2"
+        local package_name="$3"
+        if command -v "$cmd_name" &>/dev/null; then
+            available+=("$display_name")
+        else
+            missing+=("$display_name")
+            install_pkgs+=("$package_name")
+        fi
+    }
+
+    case "$os" in
+        Linux)
+            check_dep Xvfb Xvfb xorg-server-xvfb
+            check_dep xdotool xdotool xdotool
+            check_dep maim maim maim
+            check_dep ffmpeg ffmpeg ffmpeg
+            check_dep jq jq jq
+            check_dep tesseract tesseract tesseract
+            check_dep magick ImageMagick imagemagick
+
+            if command -v tesseract &>/dev/null &&
+                ! tesseract --list-langs 2>/dev/null | grep -qx "eng"; then
+                missing+=("tesseract-data-eng")
+                install_pkgs+=("tesseract-data-eng")
+            fi
+
+            # Check for software Vulkan (lavapipe)
+            local has_swrast=false
+            if vulkaninfo 2>/dev/null | grep -qi "lavapipe\|llvmpipe\|SwiftShader" 2>/dev/null; then
+                has_swrast=true
+                available+=("vulkan-swrast")
+            elif pacman -Qs vulkan-swrast &>/dev/null 2>/dev/null; then
+                has_swrast=true
+                available+=("vulkan-swrast")
+            else
+                missing+=("vulkan-swrast")
+            fi
+
+            echo "Available: ${available[*]:-none}"
+            if [[ ${#missing[@]} -gt 0 ]]; then
+                echo "Missing: ${missing[*]}"
+                echo ""
+                echo "Install with:"
+                echo "  sudo pacman -S ${install_pkgs[*]}"
+                return 1
+            fi
+
+            echo "Status: READY"
+            echo "Mode: xvfb-isolated (your mouse/keyboard untouched)"
+            ;;
+        Darwin)
+            check_dep cliclick cliclick cliclick
+            check_dep ffmpeg ffmpeg ffmpeg
+            check_dep jq jq jq
+            check_dep tesseract tesseract tesseract
+            check_dep magick ImageMagick imagemagick
+
+            if ! command -v screencapture &>/dev/null; then
+                missing+=("screencapture")
+            else
+                available+=("screencapture")
+            fi
+
+            echo "Available: ${available[*]:-none}"
+            if [[ ${#missing[@]} -gt 0 ]]; then
+                echo "Missing: ${missing[*]}"
+                echo ""
+                echo "Install with:"
+                echo "  brew install ${install_pkgs[*]}"
+                if [[ " ${missing[*]} " == *" screencapture "* ]]; then
+                    echo "  screencapture should be present on macOS by default"
+                fi
+                return 1
+            fi
+
+            echo "Status: READY (with limitations)"
+            echo "Mode: direct (will take over mouse — confirmation required)"
+            warn "macOS cannot isolate input. Your mouse/keyboard will be used."
+            ;;
+        *)
+            die "Unsupported platform: $os"
+            ;;
+    esac
+}
+
+cmd_start() {
+    local size="1920x1080" build=false depth=24 scale=1 layout=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --size) size="$2"; shift 2 ;;
+            --build) build=true; shift ;;
+            --scale) scale="$2"; shift 2 ;;
+            --hidpi) scale=2; shift ;;
+            --layout) layout="$2"; shift 2 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    if [[ -n "$layout" ]] && [[ ! -f "$layout" ]]; then
+        die "Layout fixture not found: $layout"
+    fi
+
+    # Cleanup any stale session
+    if [[ -f "$SESSION_FILE" ]]; then
+        warn "Cleaning up stale session"
+        cmd_stop 2>/dev/null || true
+    fi
+
+    # Always generate a fresh run directory (don't reuse stale session's path).
+    _new_screenshot_dir
+    mkdir -p "$SCREENSHOT_DIR"
+    _invalidate_ocr_cache
+
+    local os
+    os="$(uname -s)"
+
+    case "$os" in
+        Linux) _start_linux "$size" "$depth" "$build" "$scale" "$layout" ;;
+        Darwin) _start_mac "$size" "$build" "$scale" "$layout" ;;
+        *) die "Unsupported platform: $os" ;;
+    esac
+}
+
+_start_linux() {
+    local size="$1" depth="$2" build="$3" scale="${4:-1}" layout="${5:-}"
+    local width height
+    width="${size%x*}"
+    height="${size#*x}"
+
+    # Scale Xvfb resolution for HiDPI (logical size stays the same for coordinates)
+    local phys_width=$((width * scale))
+    local phys_height=$((height * scale))
+    local dpi=$((96 * scale))
+
+    # Find free display
+    local display
+    display=$(find_free_display)
+    if [[ "$scale" -gt 1 ]]; then
+        info "Using virtual display :$display (${phys_width}x${phys_height}x${depth}, scale=${scale}x, logical ${width}x${height})"
+    else
+        info "Using virtual display :$display (${width}x${height}x${depth})"
+    fi
+
+    local session_log_dir="$SCREENSHOT_DIR/session-logs"
+    mkdir -p "$session_log_dir"
+    local xvfb_log="$session_log_dir/xvfb.log"
+    local app_log="$session_log_dir/app.log"
+    local map_path="$SCREENSHOT_DIR/live-map.json"
+
+    # Start Xvfb — trap ensures cleanup on interrupt
+    trap 'cmd_stop 2>/dev/null; exit 130' INT TERM
+    nohup setsid Xvfb ":$display" -screen 0 "${phys_width}x${phys_height}x${depth}" -dpi "$dpi" -ac -nolisten tcp \
+        >"$xvfb_log" 2>&1 < /dev/null &
+    local xvfb_pid=$!
+    sleep 1
+
+    if ! kill -0 "$xvfb_pid" 2>/dev/null; then
+        die "Xvfb failed to start"
+    fi
+    info "Xvfb started (PID $xvfb_pid)"
+
+    # Build if requested
+    local binary="$VQA_APP_BINARY"
+    if [[ "$build" == "true" ]]; then
+        info "Building app..."
+        if ! $VQA_BUILD_CMD 2>&1; then
+            kill "$xvfb_pid" 2>/dev/null
+            die "Build failed"
+        fi
+    fi
+
+    if [[ ! -x "$binary" ]]; then
+        kill "$xvfb_pid" 2>/dev/null
+        die "Binary not found: $binary (use --build to compile)"
+    fi
+
+    # Launch app in virtual display with software rendering.
+    # Must unset WAYLAND_DISPLAY so winit connects to Xvfb (X11) instead of the
+    # real Wayland compositor. WGPU_BACKEND=vulkan uses lavapipe (Mesa software Vulkan).
+    # WINIT_X11_SCALE_FACTOR tells winit/Iced the HiDPI scale for proper rendering.
+    info "Launching app in virtual display..."
+    if [[ -n "$layout" ]]; then
+        nohup setsid env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE \
+            DISPLAY=":$display" \
+            WINIT_UNIX_BACKEND=x11 \
+            WINIT_X11_SCALE_FACTOR="$scale" \
+            ${VQA_LAYOUT_ENV_KEY}="$layout" \
+            ${VQA_MAP_ENV_KEY}="$map_path" \
+            WGPU_BACKEND="${WGPU_BACKEND:-vulkan}" \
+            "$binary" >"$app_log" 2>&1 < /dev/null &
+    else
+        nohup setsid env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE \
+            DISPLAY=":$display" \
+            WINIT_UNIX_BACKEND=x11 \
+            WINIT_X11_SCALE_FACTOR="$scale" \
+            ${VQA_DEFAULT_LAYOUT_ENV} \
+            ${VQA_MAP_ENV_KEY}="$map_path" \
+            WGPU_BACKEND="${WGPU_BACKEND:-vulkan}" \
+            "$binary" >"$app_log" 2>&1 < /dev/null &
+    fi
+    local app_pid=$!
+    sleep 2
+
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+        kill "$xvfb_pid" 2>/dev/null
+        die "App failed to start in virtual display"
+    fi
+
+    # Find window
+    local wid
+    wid=$(wait_for_window "$display" "$VQA_WINDOW_TITLE" 30) || {
+        kill "$app_pid" 2>/dev/null
+        kill "$xvfb_pid" 2>/dev/null
+        die "Window '$VQA_WINDOW_TITLE' not found within 15s"
+    }
+    info "Window found (ID: $wid)"
+
+    # Focus and resize to ensure consistent geometry (use physical pixels for X11)
+    DISPLAY=":$display" xdotool windowfocus "$wid" 2>/dev/null || true
+    DISPLAY=":$display" xdotool windowsize "$wid" "$phys_width" "$phys_height" 2>/dev/null || true
+    DISPLAY=":$display" xdotool windowmove "$wid" 0 0 2>/dev/null || true
+    sleep 0.5
+
+    # Get actual geometry
+    local geom
+    geom=$(DISPLAY=":$display" xdotool getwindowgeometry --shell "$wid" 2>/dev/null)
+    local win_x win_y win_w win_h
+    win_x=$(echo "$geom" | grep "^X=" | cut -d= -f2)
+    win_y=$(echo "$geom" | grep "^Y=" | cut -d= -f2)
+    win_w=$(echo "$geom" | grep "^WIDTH=" | cut -d= -f2)
+    win_h=$(echo "$geom" | grep "^HEIGHT=" | cut -d= -f2)
+
+    # Write session
+    cat > "$SESSION_FILE" <<EOF
+{
+    "display": $display,
+    "xvfb_pid": $xvfb_pid,
+    "app_pid": $app_pid,
+    "window_id": $wid,
+    "window_x": ${win_x:-0},
+    "window_y": ${win_y:-0},
+    "window_width": ${win_w:-$width},
+    "window_height": ${win_h:-$height},
+    "scale": $scale,
+    "platform": "linux",
+    "mode": "xvfb-isolated",
+    "layout_fixture": "$layout",
+    "map_path": "$map_path",
+    "screenshot_dir": "$SCREENSHOT_DIR",
+    "screenshot_count": 0
+}
+EOF
+
+    echo "Session started successfully."
+    cat "$SESSION_FILE"
+
+    # Pre-warm OCR cache so first locate is instant (~550ms now, 0ms later)
+    info "Pre-warming OCR cache..."
+    _get_ocr_tsv > /dev/null 2>&1 || true
+
+    cmd_watch
+}
+
+_start_mac() {
+    local size="$1" build="$2" scale="${3:-1}" layout="${4:-}"
+    local width height
+    width="${size%x*}"
+    height="${size#*x}"
+
+    warn "macOS mode: will use your real mouse/keyboard"
+
+    local binary="$VQA_APP_BINARY"
+    local map_path="$SCREENSHOT_DIR/live-map.json"
+    if [[ "$build" == "true" ]]; then
+        info "Building app..."
+        if ! $VQA_BUILD_CMD 2>&1; then
+            die "Build failed"
+        fi
+    fi
+
+    if [[ ! -x "$binary" ]]; then
+        die "Binary not found: $binary (use --build to compile)"
+    fi
+
+    if [[ -n "$layout" ]]; then
+        ${VQA_LAYOUT_ENV_KEY}="$layout" ${VQA_MAP_ENV_KEY}="$map_path" "$binary" &
+    else
+        ${VQA_DEFAULT_LAYOUT_ENV} ${VQA_MAP_ENV_KEY}="$map_path" "$binary" &
+    fi
+    local app_pid=$!
+    sleep 3
+
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+        die "App failed to start"
+    fi
+
+    # Get window ID via osascript
+    local wid
+    wid=$(osascript -e 'tell application "System Events" to get id of first window of (first process whose name is "$VQA_WINDOW_TITLE")' 2>/dev/null || echo "unknown")
+
+    cat > "$SESSION_FILE" <<EOF
+{
+    "display": 0,
+    "xvfb_pid": 0,
+    "app_pid": $app_pid,
+    "window_id": "$wid",
+    "window_x": 0,
+    "window_y": 0,
+    "window_width": $width,
+    "window_height": $height,
+    "scale": $scale,
+    "platform": "darwin",
+    "mode": "direct",
+    "layout_fixture": "$layout",
+    "map_path": "$map_path",
+    "screenshot_dir": "$SCREENSHOT_DIR",
+    "screenshot_count": 0
+}
+EOF
+
+    echo "Session started (macOS direct mode)."
+    cat "$SESSION_FILE"
+}
+
+cmd_screenshot() {
+    require_session
+    _invalidate_ocr_cache
+    _resolve_screenshot_dir
+    local output=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --output) output="$2"; shift 2 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    # Auto-name if no output specified
+    if [[ -z "$output" ]]; then
+        mkdir -p "$SCREENSHOT_DIR"
+        local count
+        count=$(jq -r '.screenshot_count // 0' "$SESSION_FILE")
+        count=$((count + 1))
+        output="$SCREENSHOT_DIR/screenshot_$(printf '%03d' "$count").png"
+        # Update counter
+        jq ".screenshot_count = $count" "$SESSION_FILE" > "$SESSION_FILE.tmp" && mv "$SESSION_FILE.tmp" "$SESSION_FILE"
+    fi
+
+    local platform
+    platform=$(session_get platform)
+    local display wid
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            # maim captures by window ID; fall back to full display with import
+            if command -v maim &>/dev/null; then
+                DISPLAY="$display" maim -i "$wid" "$output" 2>/dev/null || \
+                DISPLAY="$display" maim "$output" 2>/dev/null || \
+                DISPLAY="$display" import -window root "$output"
+            else
+                DISPLAY="$display" import -window root "$output"
+            fi
+            ;;
+        darwin)
+            screencapture -x "$output"
+            ;;
+    esac
+
+    if [[ -f "$output" ]]; then
+        echo "$output"
+    else
+        die "Screenshot failed"
+    fi
+}
+
+cmd_click() {
+    [[ $# -ge 2 ]] || die "Usage: visual-qa click X Y"
+    require_session
+    _invalidate_ocr_cache
+    local x="$1" y="$2"
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool windowfocus "$wid" 2>/dev/null || true
+            DISPLAY="$display" xdotool mousemove --window "$wid" "$x" "$y"
+            DISPLAY="$display" xdotool click 1
+            ;;
+        darwin)
+            cliclick "c:$x,$y"
+            ;;
+    esac
+    sleep 0.05
+}
+
+cmd_double_click() {
+    [[ $# -ge 2 ]] || die "Usage: visual-qa double-click X Y"
+    require_session
+    _invalidate_ocr_cache
+    local x="$1" y="$2"
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool windowfocus "$wid" 2>/dev/null || true
+            DISPLAY="$display" xdotool mousemove --window "$wid" "$x" "$y"
+            DISPLAY="$display" xdotool click --repeat 2 --delay 100 1
+            ;;
+        darwin)
+            cliclick "dc:$x,$y"
+            ;;
+    esac
+    sleep 0.05
+}
+
+cmd_right_click() {
+    [[ $# -ge 2 ]] || die "Usage: visual-qa right-click X Y"
+    require_session
+    _invalidate_ocr_cache
+    local x="$1" y="$2"
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool windowfocus "$wid" 2>/dev/null || true
+            DISPLAY="$display" xdotool mousemove --window "$wid" "$x" "$y"
+            DISPLAY="$display" xdotool click 3
+            ;;
+        darwin)
+            cliclick "rc:$x,$y"
+            ;;
+    esac
+    sleep 0.05
+}
+
+cmd_drag() {
+    [[ $# -ge 4 ]] || die "Usage: visual-qa drag X1 Y1 X2 Y2 [--steps N]"
+    require_session
+    _invalidate_ocr_cache
+    local x1="$1" y1="$2" x2="$3" y2="$4"
+    shift 4
+    local steps=20
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --steps) steps="$2"; shift 2 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool windowfocus "$wid" 2>/dev/null || true
+            DISPLAY="$display" xdotool mousemove --window "$wid" "$x1" "$y1"
+            DISPLAY="$display" xdotool mousedown 1
+
+            # Interpolate movement for smooth drag
+            local i=0
+            while [[ $i -le $steps ]]; do
+                local cx=$(( x1 + (x2 - x1) * i / steps ))
+                local cy=$(( y1 + (y2 - y1) * i / steps ))
+                DISPLAY="$display" xdotool mousemove --window "$wid" "$cx" "$cy"
+                sleep 0.01
+                i=$((i + 1))
+            done
+
+            DISPLAY="$display" xdotool mouseup 1
+            ;;
+        darwin)
+            cliclick "dd:$x1,$y1" "dm:$x2,$y2" "du:$x2,$y2"
+            ;;
+    esac
+    sleep 0.1
+}
+
+cmd_mousedown() {
+    [[ $# -ge 2 ]] || die "Usage: visual-qa mousedown X Y [--button N]"
+    require_session
+    _invalidate_ocr_cache
+    local x="$1" y="$2"
+    shift 2
+    local button=1
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --button) button="$2"; shift 2 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool windowfocus "$wid" 2>/dev/null || true
+            DISPLAY="$display" xdotool mousemove --window "$wid" "$x" "$y"
+            DISPLAY="$display" xdotool mousedown "$button"
+            ;;
+        darwin)
+            cliclick "dd:$x,$y"
+            ;;
+    esac
+    sleep 0.05
+}
+
+cmd_mouseup() {
+    require_session
+    _invalidate_ocr_cache
+    local platform display
+    platform=$(session_get platform)
+    local button=1
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --button) button="$2"; shift 2 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            DISPLAY="$display" xdotool mouseup "$button"
+            ;;
+        darwin)
+            cliclick "du:0,0"
+            ;;
+    esac
+    sleep 0.05
+}
+
+cmd_move() {
+    [[ $# -ge 2 ]] || die "Usage: visual-qa move X Y"
+    require_session
+    local x="$1" y="$2"
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool mousemove --window "$wid" "$x" "$y"
+            ;;
+        darwin)
+            cliclick "m:$x,$y"
+            ;;
+    esac
+    sleep 0.05
+}
+
+cmd_key() {
+    [[ $# -ge 1 ]] || die "Usage: visual-qa key KEY"
+    require_session
+    _invalidate_ocr_cache
+    local key="$1"
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool key --window "$wid" "$key"
+            ;;
+        darwin)
+            osascript -e "tell application \"System Events\" to keystroke \"$key\""
+            ;;
+    esac
+    sleep 0.05
+}
+
+cmd_type() {
+    [[ $# -ge 1 ]] || die "Usage: visual-qa type \"text\""
+    require_session
+    _invalidate_ocr_cache
+    local text="$1"
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            DISPLAY="$display" xdotool type --window "$wid" "$text"
+            ;;
+        darwin)
+            osascript -e "tell application \"System Events\" to keystroke \"$text\""
+            ;;
+    esac
+    sleep 0.05
+}
+
+cmd_window_info() {
+    require_session
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            local geom
+            geom=$(DISPLAY="$display" xdotool getwindowgeometry --shell "$wid" 2>/dev/null)
+            local win_x win_y win_w win_h
+            win_x=$(echo "$geom" | grep "^X=" | cut -d= -f2)
+            win_y=$(echo "$geom" | grep "^Y=" | cut -d= -f2)
+            win_w=$(echo "$geom" | grep "^WIDTH=" | cut -d= -f2)
+            win_h=$(echo "$geom" | grep "^HEIGHT=" | cut -d= -f2)
+            jq -n \
+                --arg wid "$wid" \
+                --arg x "${win_x:-0}" \
+                --arg y "${win_y:-0}" \
+                --arg w "${win_w:-0}" \
+                --arg h "${win_h:-0}" \
+                '{window_id: $wid, x: ($x|tonumber), y: ($y|tonumber), width: ($w|tonumber), height: ($h|tonumber)}'
+            ;;
+        darwin)
+            cat "$SESSION_FILE"
+            ;;
+    esac
+}
+
+cmd_map() {
+    echo "$(_map_json)" | jq '.'
+}
+
+cmd_status() {
+    if [[ ! -f "$SESSION_FILE" ]]; then
+        jq -n '{active: false}'
+        return 0
+    fi
+
+    local session_json platform display wid
+    session_json=$(cat "$SESSION_FILE")
+    platform=$(echo "$session_json" | jq -r '.platform // empty')
+    display=$(echo "$session_json" | jq -r '.display // empty')
+    wid=$(echo "$session_json" | jq -r '.window_id // empty')
+
+    local app_pid viewer_pid xvfb_pid ffmpeg_pid map_path
+    app_pid=$(echo "$session_json" | jq -r '.app_pid // empty')
+    viewer_pid=$(echo "$session_json" | jq -r '.viewer_pid // empty')
+    xvfb_pid=$(echo "$session_json" | jq -r '.xvfb_pid // empty')
+    ffmpeg_pid=$(echo "$session_json" | jq -r '.ffmpeg_pid // empty')
+    map_path=$(echo "$session_json" | jq -r '.map_path // empty')
+
+    local app_alive viewer_alive xvfb_alive recording_alive display_reachable map_ready pane_count
+    app_alive=$([[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null && echo true || echo false)
+    viewer_alive=$([[ -n "$viewer_pid" ]] && kill -0 "$viewer_pid" 2>/dev/null && echo true || echo false)
+    xvfb_alive=$([[ -n "$xvfb_pid" && "$xvfb_pid" != "0" ]] && kill -0 "$xvfb_pid" 2>/dev/null && echo true || echo false)
+    recording_alive=$([[ -n "$ffmpeg_pid" ]] && kill -0 "$ffmpeg_pid" 2>/dev/null && echo true || echo false)
+
+    if [[ "$platform" == "linux" ]]; then
+        display_reachable=$(
+            DISPLAY=":$display" xdotool getwindowgeometry --shell "$wid" >/dev/null 2>&1 &&
+                echo true || echo false
+        )
+    else
+        display_reachable=true
+    fi
+
+    if [[ -n "$map_path" ]] && [[ -f "$map_path" ]]; then
+        map_ready=true
+        pane_count=$(jq '.panes | length' "$map_path" 2>/dev/null || echo 0)
+    else
+        map_ready=false
+        pane_count=0
+    fi
+
+    echo "$session_json" | jq \
+        --argjson active true \
+        --argjson app_alive "$app_alive" \
+        --argjson viewer_alive "$viewer_alive" \
+        --argjson xvfb_alive "$xvfb_alive" \
+        --argjson recording_alive "$recording_alive" \
+        --argjson display_reachable "$display_reachable" \
+        --arg map_path "$map_path" \
+        --argjson map_ready "$map_ready" \
+        --argjson pane_count "$pane_count" \
+        '. + {
+            active: $active,
+            health: {
+                app_alive: $app_alive,
+                viewer_alive: $viewer_alive,
+                xvfb_alive: $xvfb_alive,
+                recording_alive: $recording_alive,
+                display_reachable: $display_reachable
+            },
+            map: {
+                path: $map_path,
+                ready: $map_ready,
+                pane_count: $pane_count
+            }
+        }'
+}
+
+cmd_doctor() {
+    local setup_status=0 setup_output status_json
+    setup_output=$(cmd_setup 2>&1) || setup_status=$?
+    echo "$setup_output"
+    echo ""
+
+    status_json=$(cmd_status)
+    echo "$status_json"
+
+    if [[ $setup_status -ne 0 ]]; then
+        return 1
+    fi
+
+    if [[ "$(echo "$status_json" | jq -r '.active')" != "true" ]]; then
+        return 0
+    fi
+
+    echo "$status_json" | jq -e '
+        .health.app_alive
+        and .health.display_reachable
+        and (.health.xvfb_alive or .platform != "linux")
+        and (.map.ready or (.map.path == ""))
+    ' >/dev/null
+}
+
+cmd_record() {
+    [[ $# -ge 1 ]] || die "Usage: visual-qa record start|stop [--output PATH]"
+    require_session
+    _resolve_screenshot_dir
+    local subcmd="$1"; shift
+
+    case "$subcmd" in
+        start)
+            mkdir -p "$SCREENSHOT_DIR"
+            local output="$SCREENSHOT_DIR/recording.mp4"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --output) output="$2"; shift 2 ;;
+                    *) die "Unknown option: $1" ;;
+                esac
+            done
+
+            local platform display
+            platform=$(session_get platform)
+            local win_w win_h
+            win_w=$(session_get window_width)
+            win_h=$(session_get window_height)
+
+            case "$platform" in
+                linux)
+                    display=$(session_display)
+                    local session_log_dir record_log
+                    session_log_dir="$(session_get screenshot_dir)/session-logs"
+                    mkdir -p "$session_log_dir"
+                    record_log="$session_log_dir/recording.log"
+                    nohup setsid ffmpeg -f x11grab -video_size "${win_w}x${win_h}" \
+                        -framerate 30 -i "$display" \
+                        -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+                        "$output" >"$record_log" 2>&1 < /dev/null &
+                    local ffmpeg_pid=$!
+                    jq ".ffmpeg_pid = $ffmpeg_pid | .recording_path = \"$output\"" \
+                        "$SESSION_FILE" > "$SESSION_FILE.tmp" && mv "$SESSION_FILE.tmp" "$SESSION_FILE"
+                    info "Recording to $output (PID $ffmpeg_pid)"
+                    ;;
+                darwin)
+                    screencapture -v "$output" &
+                    local sc_pid=$!
+                    jq ".ffmpeg_pid = $sc_pid | .recording_path = \"$output\"" \
+                        "$SESSION_FILE" > "$SESSION_FILE.tmp" && mv "$SESSION_FILE.tmp" "$SESSION_FILE"
+                    info "Recording to $output (PID $sc_pid)"
+                    ;;
+            esac
+            ;;
+        stop)
+            local ffmpeg_pid
+            ffmpeg_pid=$(session_get ffmpeg_pid)
+            if [[ -n "$ffmpeg_pid" ]] && kill -0 "$ffmpeg_pid" 2>/dev/null; then
+                kill -INT "$ffmpeg_pid" 2>/dev/null
+                # Wait for ffmpeg to finalize the file (can't use wait — different process tree)
+                local i=0
+                while kill -0 "$ffmpeg_pid" 2>/dev/null && [[ $i -lt 20 ]]; do
+                    sleep 0.1
+                    i=$((i + 1))
+                done
+                local path
+                path=$(session_get recording_path)
+                if [[ ! -f "$path" ]]; then
+                    die "Recording file missing after stop: $path"
+                fi
+                local size_bytes
+                size_bytes=$(wc -c < "$path" | tr -d ' ')
+                if [[ "$size_bytes" -eq 0 ]]; then
+                    die "Recording file is empty: $path"
+                fi
+                info "Recording saved: $path"
+                if command -v ffprobe &>/dev/null; then
+                    local recording_meta
+                    recording_meta=$(ffprobe -v error \
+                        -show_entries format=duration,size \
+                        -of default=noprint_wrappers=1 \
+                        "$path" 2>/dev/null || true)
+                    [[ -n "$recording_meta" ]] && printf '%s\n' "$recording_meta" >&2
+                else
+                    info "Recording size bytes: $size_bytes"
+                fi
+                echo "$path"
+            else
+                warn "No active recording"
+            fi
+            ;;
+        *)
+            die "Unknown record subcommand: $subcmd (use start|stop)"
+            ;;
+    esac
+}
+
+cmd_watch() {
+    require_session
+    local platform display
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            local win_w win_h
+            win_w=$(session_get window_width)
+            win_h=$(session_get window_height)
+            info "Opening live viewer (read-only — your mouse won't affect the virtual display)"
+            info "Close the viewer window to stop watching."
+            local session_log_dir viewer_log
+            session_log_dir="$(session_get screenshot_dir)/session-logs"
+            mkdir -p "$session_log_dir"
+            viewer_log="$session_log_dir/viewer.log"
+            # ffplay shows the Xvfb framebuffer on the real display.
+            # The user sees everything but their mouse only affects the ffplay window (view-only).
+            nohup setsid ffplay -f x11grab -video_size "${win_w}x${win_h}" \
+                -framerate 15 -i "$display" \
+                -window_title "Visual QA — Live View (read-only)" \
+                -loglevel quiet >"$viewer_log" 2>&1 < /dev/null &
+            local viewer_pid=$!
+            jq ".viewer_pid = $viewer_pid" "$SESSION_FILE" > "$SESSION_FILE.tmp" && mv "$SESSION_FILE.tmp" "$SESSION_FILE"
+            info "Viewer started (PID $viewer_pid)"
+            ;;
+        darwin)
+            warn "macOS: live viewer not available (app is on your real display already)"
+            ;;
+    esac
+}
+
+cmd_baseline() {
+    [[ $# -ge 1 ]] || die "Usage: visual-qa baseline capture|check [options]"
+    local subcmd="$1"; shift
+
+    case "$subcmd" in
+        capture) _baseline_run false "$@" ;;
+        check)   _baseline_run true "$@" ;;
+        *)       die "Unknown baseline subcommand: $subcmd (use capture|check)" ;;
+    esac
+}
+
+_binary_has_dev_screenshot_support() {
+    local binary="$1"
+    [[ -f "$binary" ]] || return 1
+    LC_ALL=C grep -aq '${VQA_SCREENSHOT_ENV_KEY}' "$binary" 2>/dev/null
+}
+
+_detect_platform() {
+    case "$(uname -s)" in
+        Linux*)  echo "linux" ;;
+        Darwin*) echo "macos" ;;
+        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+        *)       echo "linux" ;;  # fallback
+    esac
+}
+
+_baseline_run() {
+    local do_compare="$1"; shift
+    local fixtures_dir="$ROOT_DIR/testdata/golden/layouts"
+    local platform
+    platform=$(_detect_platform)
+    local golden_dir="$ROOT_DIR/testdata/golden/screenshots/$platform"
+    local output_dir=""
+    local scenarios="all"
+    local build=true
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --scenarios) scenarios="$2"; shift 2 ;;
+            --output)    output_dir="$2"; shift 2 ;;
+            --no-build)  build=false; shift ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    # Default output: golden dir for capture, temp dir for check
+    if [[ -z "$output_dir" ]]; then
+        if [[ "$do_compare" == "false" ]]; then
+            output_dir="$golden_dir"
+        else
+            output_dir="$ROOT_DIR/testdata/screenshots/baseline-check-$(date +%Y%m%d-%H%M%S)"
+        fi
+    fi
+    mkdir -p "$output_dir"
+
+    # Build once
+    if [[ "$build" == "true" ]]; then
+        info "Building app..."
+        if ! $VQA_BUILD_CMD 2>&1; then
+            die "Build failed"
+        fi
+    fi
+
+    # Resolve scenarios
+    local fixture_files=()
+    if [[ "$scenarios" == "all" ]]; then
+        for f in "$fixtures_dir"/*.ron; do
+            [[ -f "$f" ]] && fixture_files+=("$f")
+        done
+    else
+        IFS=',' read -ra names <<< "$scenarios"
+        for name in "${names[@]}"; do
+            local f="$fixtures_dir/${name}.ron"
+            [[ -f "$f" ]] || die "Fixture not found: $f"
+            fixture_files+=("$f")
+        done
+    fi
+
+    [[ ${#fixture_files[@]} -gt 0 ]] || die "No fixture files found in $fixtures_dir"
+
+    local total=${#fixture_files[@]}
+    local passed=0 failed=0 regressions=0
+    local results=()
+    local diagnostics_dir="$output_dir/baseline-logs"
+    local shared_failure_consistent=true
+    local shared_failure_stage=""
+    local shared_failure_error=""
+    local shared_failure_hint=""
+    local shared_failure_log=""
+    mkdir -p "$diagnostics_dir"
+
+    if [[ "$do_compare" == "true" ]]; then
+        info "Baseline check: $total scenarios (comparing against $golden_dir)"
+    else
+        info "Baseline capture: $total scenarios → $output_dir"
+    fi
+
+    if [[ "$build" == "false" ]]; then
+        local binary="$VQA_APP_BINARY"
+        if [[ -x "$binary" ]] && ! _binary_has_dev_screenshot_support "$binary"; then
+            local preflight_log="$diagnostics_dir/preflight.log"
+            local preflight_error="Binary $binary does not include the dev-only screenshot path required for baseline capture."
+            local preflight_hint="Rebuild with: $VQA_BUILD_CMD, or rerun baseline capture without --no-build."
+
+            cat > "$preflight_log" <<EOF
+FAIL: visual-qa baseline preflight failed
+stage: build/bootstrap
+cause: $preflight_error
+hint: $preflight_hint
+binary: $binary
+EOF
+
+            warn "Baseline preflight failed: $preflight_error"
+            warn "  hint: $preflight_hint"
+
+            for f in "${fixture_files[@]}"; do
+                local name
+                name=$(basename "$f" .ron)
+                echo "  $name: FAILED (build/bootstrap)"
+                results+=("$(jq -nc \
+                    --arg scenario "$name" \
+                    --arg stage "build/bootstrap" \
+                    --arg error "$preflight_error" \
+                    --arg hint "$preflight_hint" \
+                    --arg log_path "$preflight_log" \
+                    '{scenario:$scenario,captured:false,stage:$stage,error:$error,hint:$hint,log_path:$log_path}')")
+            done
+
+            failed=$total
+            shared_failure_stage="build/bootstrap"
+            shared_failure_error="$preflight_error"
+            shared_failure_hint="$preflight_hint"
+            shared_failure_log="$preflight_log"
+        fi
+    fi
+
+    if [[ $failed -eq 0 ]]; then
+        for f in "${fixture_files[@]}"; do
+            local name
+            name=$(basename "$f" .ron)
+            local screenshot capture_output scenario_log stage error hint
+            scenario_log="$diagnostics_dir/${name}.capture.log"
+
+            if capture_output=$("$SCRIPT_DIR/screenshot" --no-build --layout "$f" --output "$output_dir" 2>&1); then
+                printf '%s\n' "$capture_output" > "$scenario_log"
+                screenshot=$(printf '%s\n' "$capture_output" | tail -1)
+            else
+                printf '%s\n' "$capture_output" > "$scenario_log"
+                stage=$(printf '%s\n' "$capture_output" | sed -n 's/^stage: //p' | head -1)
+                error=$(printf '%s\n' "$capture_output" | sed -n 's/^cause: //p' | head -1)
+                hint=$(printf '%s\n' "$capture_output" | sed -n 's/^hint: //p' | head -1)
+                warn "$name: capture FAILED${stage:+ ($stage)}"
+                [[ -n "$error" ]] && warn "  cause: $error"
+                results+=("$(jq -nc \
+                    --arg scenario "$name" \
+                    --arg stage "$stage" \
+                    --arg error "$error" \
+                    --arg hint "$hint" \
+                    --arg log_path "$scenario_log" \
+                    '{scenario:$scenario,captured:false,stage:$stage,error:$error,hint:$hint,log_path:$log_path}')")
+                failed=$((failed + 1))
+
+                if [[ -z "$shared_failure_error" ]]; then
+                    shared_failure_stage="$stage"
+                    shared_failure_error="$error"
+                    shared_failure_hint="$hint"
+                    shared_failure_log="$scenario_log"
+                elif [[ "$shared_failure_stage" != "$stage" ]] || [[ "$shared_failure_error" != "$error" ]]; then
+                    shared_failure_consistent=false
+                fi
+                continue
+            fi
+
+            if [[ ! -f "$screenshot" ]]; then
+                error="Screenshot helper exited successfully but did not produce a file."
+                hint="Inspect the scenario log for the raw capture output."
+                warn "$name: capture FAILED"
+                results+=("$(jq -nc \
+                    --arg scenario "$name" \
+                    --arg stage "screenshot capture" \
+                    --arg error "$error" \
+                    --arg hint "$hint" \
+                    --arg log_path "$scenario_log" \
+                    '{scenario:$scenario,captured:false,stage:$stage,error:$error,hint:$hint,log_path:$log_path}')")
+                failed=$((failed + 1))
+
+                if [[ -z "$shared_failure_error" ]]; then
+                    shared_failure_stage="screenshot capture"
+                    shared_failure_error="$error"
+                    shared_failure_hint="$hint"
+                    shared_failure_log="$scenario_log"
+                elif [[ "$shared_failure_stage" != "screenshot capture" ]] || [[ "$shared_failure_error" != "$error" ]]; then
+                    shared_failure_consistent=false
+                fi
+                continue
+            fi
+
+            # Compare against golden baselines (check mode only)
+            local golden_match="null" rmse="null"
+            if [[ "$do_compare" == "true" ]]; then
+                local golden_file
+                golden_file=$(find "$golden_dir" -name "${name}_*" -type f 2>/dev/null | head -1)
+                if [[ -n "$golden_file" ]] && command -v compare &>/dev/null; then
+                    rmse=$(compare -metric RMSE "$screenshot" "$golden_file" /dev/null 2>&1 | sed 's/[^0-9.]//g' | tail -1 || echo "error")
+                    if [[ "$rmse" != "error" ]] && (( $(echo "$rmse < 0.05" | bc -l 2>/dev/null || echo 0) )); then
+                        golden_match="true"
+                    else
+                        golden_match="false"
+                        regressions=$((regressions + 1))
+                    fi
+                    echo "  $name: RMSE=$rmse $([ "$golden_match" = "true" ] && echo "✓" || echo "✗ REGRESSION")"
+                elif [[ -z "$golden_file" ]]; then
+                    echo "  $name: captured (no baseline to compare)"
+                else
+                    echo "  $name: captured (compare not installed, skipping diff)"
+                fi
+            else
+                echo "  $name: captured"
+            fi
+
+            results+=("$(jq -nc \
+                --arg scenario "$name" \
+                --arg path "$screenshot" \
+                --argjson golden_match "$golden_match" \
+                --argjson rmse "$rmse" \
+                '{scenario:$scenario,captured:true,path:$path,golden_match:$golden_match,rmse:$rmse}')")
+            passed=$((passed + 1))
+        done
+    fi
+
+    # Write report
+    local mode verdict
+    if [[ "$do_compare" == "true" ]]; then
+        mode="baseline-check"
+        [[ $regressions -gt 0 || $failed -gt 0 ]] && verdict="action_required" || verdict="pass"
+    else
+        mode="baseline-capture"
+        [[ $failed -gt 0 ]] && verdict="action_required" || verdict="pass"
+    fi
+
+    local scenarios_json="[]"
+    if [[ ${#results[@]} -gt 0 ]]; then
+        scenarios_json="[$(IFS=,; echo "${results[*]}")]"
+    fi
+
+    local shared_failure_json="null"
+    if [[ $failed -eq $total ]] && [[ $total -gt 0 ]] && [[ "$shared_failure_consistent" == "true" ]] && [[ -n "$shared_failure_error" ]]; then
+        shared_failure_json=$(jq -nc \
+            --arg stage "$shared_failure_stage" \
+            --arg error "$shared_failure_error" \
+            --arg hint "$shared_failure_hint" \
+            --arg log_path "$shared_failure_log" \
+            '{stage:$stage,error:$error,hint:$hint,log_path:$log_path}')
+    fi
+
+    local report="$output_dir/baseline-report.json"
+    jq -n \
+        --arg agent "visual-qa" \
+        --arg mode "$mode" \
+        --arg timestamp "$(date +%Y-%m-%dT%H:%M:%S%z)" \
+        --arg verdict "$verdict" \
+        --arg summary "$total scenarios, $passed captured, $failed failed, $regressions regressions" \
+        --arg diagnostics_dir "$diagnostics_dir" \
+        --argjson scenarios "$scenarios_json" \
+        --argjson shared_failure "$shared_failure_json" \
+        --argjson screenshots_captured "$passed" \
+        --argjson scenarios_tested "$total" \
+        --argjson regressions "$regressions" \
+        --argjson pass "$([ "$verdict" = "pass" ] && echo "true" || echo "false")" \
+        '{
+            agent: $agent,
+            mode: $mode,
+            timestamp: $timestamp,
+            verdict: $verdict,
+            summary: $summary,
+            scenarios: $scenarios,
+            shared_failure: $shared_failure,
+            qa_metadata: {
+                visual_qa: {
+                    screenshots_captured: $screenshots_captured,
+                    scenarios_tested: $scenarios_tested,
+                    regressions: $regressions,
+                    pass: $pass,
+                    diagnostics_dir: $diagnostics_dir
+                }
+            }
+        }' > "$report"
+
+    # Write manifest (capture mode only)
+    if [[ "$do_compare" == "false" ]]; then
+        cat > "$output_dir/BASELINES.txt" <<EOF
+captured: $(date +%Y-%m-%d\ %H:%M:%S)
+commit: $(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+scenarios: $total
+EOF
+    fi
+
+    echo ""
+    if [[ "$do_compare" == "true" ]]; then
+        echo "Baseline check: $passed/$total captured, $regressions regressions"
+    else
+        echo "Baseline capture: $passed/$total scenarios"
+    fi
+    echo "Report: $report"
+    [[ "$verdict" == "pass" ]]
+}
+
+# --- OCR locate cache ---
+# Cache last OCR TSV to avoid re-running tesseract for sequential locate calls.
+# Invalidated on screenshot, click, drag, or any interaction command.
+# Uses a file-based stamp so the cache persists across separate invocations.
+_OCR_CACHE_FILE="/tmp/visual-qa-ocr-cache.tsv"
+_OCR_CACHE_STAMP="/tmp/visual-qa-ocr-cache.stamp"
+
+_invalidate_ocr_cache() {
+    rm -f "$_OCR_CACHE_FILE" "$_OCR_CACHE_STAMP"
+}
+
+_get_ocr_tsv() {
+    local display wid scale platform
+    display=$(session_display)
+    wid=$(session_get window_id)
+    scale=$(session_get scale)
+    platform=$(session_get platform)
+    [[ -z "$scale" || "$scale" == "0" ]] && scale=1
+
+    # Check cache — reuse if stamp exists (interactions delete it)
+    if [[ -f "$_OCR_CACHE_FILE" && -f "$_OCR_CACHE_STAMP" ]]; then
+        cat "$_OCR_CACHE_FILE"
+        return 0
+    fi
+
+    # OCR pipeline: capture window → 2x upscale → tesseract LSTM-only sparse text
+    # 2x upscale is critical: tab labels are ~10px at 1080p and undetectable without it.
+    # With 2x, all text (including small tab labels) detected at >80% confidence.
+    # Cached after first call, so subsequent locates are instant.
+    local tsv
+    case "$platform" in
+        linux)
+            tsv=$(DISPLAY="$display" maim -i "$wid" 2>/dev/null | \
+                magick - -resize 200% png:- 2>/dev/null | \
+                tesseract stdin stdout --psm 11 --oem 1 tsv 2>/dev/null)
+            ;;
+        darwin)
+            local tmp_capture
+            tmp_capture=$(mktemp /tmp/visual-qa-ocr.XXXXXX)
+            if ! screencapture -x -l "$wid" "$tmp_capture" 2>/dev/null; then
+                screencapture -x "$tmp_capture" 2>/dev/null || true
+            fi
+            tsv=$(magick "$tmp_capture" -resize 200% png:- 2>/dev/null | \
+                tesseract stdin stdout --psm 11 --oem 1 tsv 2>/dev/null)
+            rm -f "$tmp_capture"
+            ;;
+        *)
+            die "OCR unsupported on platform: $platform"
+            ;;
+    esac
+
+    if [[ -z "$tsv" ]]; then
+        die "OCR failed — check capture, ImageMagick, and tesseract dependencies"
+    fi
+
+    echo "$tsv" > "$_OCR_CACHE_FILE"
+    touch "$_OCR_CACHE_STAMP"
+    echo "$tsv"
+}
+
+cmd_locate() {
+    [[ $# -ge 1 ]] || die "Usage: visual-qa locate \"text\" [--all] [--near X Y]"
+    require_session
+
+    local search="" opt_all=false near_x="" near_y="" y_min="" y_max="" min_conf=50
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --all)     opt_all=true; shift ;;
+            --near)    near_x="$2"; near_y="$3"; shift 3 ;;
+            --y-range) y_min="$2"; y_max="$3"; shift 3 ;;
+            --conf)    min_conf="$2"; shift 2 ;;
+            *)
+                if [[ -z "$search" ]]; then
+                    search="$1"
+                else
+                    search="$search $1"
+                fi
+                shift ;;
+        esac
+    done
+
+    # OCR runs on 2x upscaled image — divide coords by 2 to get physical pixels
+    local ocr_scale=2
+
+    local tsv
+    tsv=$(_get_ocr_tsv)
+
+    # If --all with no search text, dump all detected text (debug aid)
+    if [[ "$opt_all" == "true" && -z "$search" ]]; then
+        echo "$tsv" | awk -F'\t' -v y_lo="$y_min" -v y_hi="$y_max" -v mc="$min_conf" '
+            NR > 1 && $12 != "" && $11+0 >= mc {
+                x = int(($7 + $9/2) / '"$ocr_scale"')
+                y = int(($8 + $10/2) / '"$ocr_scale"')
+                if (y_lo != "" && (y < y_lo+0 || y > y_hi+0)) next
+                printf "%d %d %s\n", x, y, $12
+            }
+        '
+        return 0
+    fi
+
+    [[ -n "$search" ]] || die "Usage: visual-qa locate \"text\" [--all] [--near X Y]"
+
+    # Parse TSV: group words by block_num + line_num, match search text
+    # Tesseract TSV columns (awk $-fields):
+    # $1=level $2=page_num $3=block_num $4=par_num $5=line_num
+    # $6=word_num $7=left $8=top $9=width $10=height $11=conf $12=text
+    local matches
+    matches=$(echo "$tsv" | awk -F'\t' -v search="$search" -v os="$ocr_scale" -v y_lo="$y_min" -v y_hi="$y_max" -v mc="$min_conf" '
+    BEGIN {
+        # Normalize search to lowercase
+        s = tolower(search)
+        n_search_words = split(s, search_words, " ")
+    }
+    NR > 1 && $12 != "" {
+        conf = $11 + 0
+        if (conf < mc) next
+
+        block = $3 + 0
+        line = $5 + 0
+        word_idx = $6 + 0
+
+        # Store word data indexed by block:line:word_num
+        wkey = block ":" line ":" word_idx
+        word_text[wkey] = tolower($12)
+        word_left[wkey] = $7 + 0
+        word_top[wkey] = $8 + 0
+        word_width[wkey] = $9 + 0
+        word_height[wkey] = $10 + 0
+
+        # Track words per line
+        lkey = block ":" line
+        if (!(lkey in line_count)) {
+            line_count[lkey] = 0
+            lines[++num_lines] = lkey
+        }
+        line_count[lkey]++
+        line_words[lkey ":" line_count[lkey]] = wkey
+    }
+    END {
+        found = 0
+        for (li = 1; li <= num_lines; li++) {
+            lk = lines[li]
+            wc = line_count[lk]
+
+            # Slide window of n_search_words across this line
+            for (wi = 1; wi <= wc - n_search_words + 1; wi++) {
+                match_ok = 1
+                for (si = 1; si <= n_search_words; si++) {
+                    wk = line_words[lk ":" (wi + si - 1)]
+                    if (word_text[wk] != search_words[si]) {
+                        match_ok = 0
+                        break
+                    }
+                }
+                if (match_ok) {
+                    # Compute bounding box union of matched words
+                    first_wk = line_words[lk ":" wi]
+                    last_wk = line_words[lk ":" (wi + n_search_words - 1)]
+                    min_left = word_left[first_wk]
+                    min_top = word_top[first_wk]
+                    max_right = word_left[last_wk] + word_width[last_wk]
+                    max_bottom = 0
+                    for (si = 1; si <= n_search_words; si++) {
+                        wk = line_words[lk ":" (wi + si - 1)]
+                        t = word_top[wk]
+                        b = t + word_height[wk]
+                        if (t < min_top) min_top = t
+                        if (b > max_bottom) max_bottom = b
+                    }
+                    # Center of bounding box, scaled back to physical pixels
+                    cx = int((min_left + max_right) / 2 / os)
+                    cy = int((min_top + max_bottom) / 2 / os)
+                    if (y_lo != "" && (cy < y_lo+0 || cy > y_hi+0)) continue
+                    found++
+                    print cx " " cy
+                }
+            }
+        }
+        if (found == 0) exit 1
+    }
+    ')
+
+    if [[ -z "$matches" ]]; then
+        die "Text not found: \"$search\""
+    fi
+
+    if [[ "$opt_all" == "true" ]]; then
+        echo "$matches"
+        return 0
+    fi
+
+    # If --near specified, pick closest match
+    if [[ -n "$near_x" && -n "$near_y" ]]; then
+        echo "$matches" | awk -v nx="$near_x" -v ny="$near_y" '
+        {
+            dx = $1 - nx; dy = $2 - ny
+            d = dx*dx + dy*dy
+            if (NR == 1 || d < best_d) { best_d = d; best = $0 }
+        }
+        END { print best }
+        '
+        return 0
+    fi
+
+    # Default: return topmost match (smallest Y = tab label, not body text)
+    echo "$matches" | sort -t' ' -k2 -n | head -1
+}
+
+cmd_cursor_pos() {
+    require_session
+    local platform display wid
+    platform=$(session_get platform)
+
+    case "$platform" in
+        linux)
+            display=$(session_display)
+            wid=$(session_get window_id)
+            local mouse_info
+            mouse_info=$(DISPLAY="$display" xdotool getmouselocation --shell 2>/dev/null)
+            local mx my
+            mx=$(echo "$mouse_info" | grep "^X=" | cut -d= -f2)
+            my=$(echo "$mouse_info" | grep "^Y=" | cut -d= -f2)
+            local win_x win_y
+            win_x=$(session_get window_x)
+            win_y=$(session_get window_y)
+            echo "$(( mx - win_x )) $(( my - win_y ))"
+            ;;
+        darwin)
+            # macOS: cliclick p gives "x,y"
+            local pos
+            pos=$(cliclick p 2>/dev/null | tr ',' ' ')
+            echo "$pos"
+            ;;
+    esac
+}
+
+# --- High-level commands ---
+
+_shared_boundary_json() {
+    local pane_a="$1" pane_b="$2"
+    jq -n --argjson a "$pane_a" --argjson b "$pane_b" '
+        def abs_value(v): if v < 0 then -v else v end;
+        def max_value(left; right): if left > right then left else right end;
+        def min_value(left; right): if left < right then left else right end;
+        ($a.rect.x + $a.rect.width) as $a_right |
+        ($b.rect.x + $b.rect.width) as $b_right |
+        ($a.rect.y + $a.rect.height) as $a_bottom |
+        ($b.rect.y + $b.rect.height) as $b_bottom |
+        if abs_value($a_right - $b.rect.x) <= 8 then
+            {
+                axis: "vertical",
+                handle_x: (($a_right + $b.rect.x) / 2),
+                segment_start: max_value($a.rect.y; $b.rect.y),
+                segment_end: min_value($a_bottom; $b_bottom)
+            }
+        elif abs_value($b_right - $a.rect.x) <= 8 then
+            {
+                axis: "vertical",
+                handle_x: (($b_right + $a.rect.x) / 2),
+                segment_start: max_value($a.rect.y; $b.rect.y),
+                segment_end: min_value($a_bottom; $b_bottom)
+            }
+        elif abs_value($a_bottom - $b.rect.y) <= 8 then
+            {
+                axis: "horizontal",
+                handle_y: (($a_bottom + $b.rect.y) / 2),
+                segment_start: max_value($a.rect.x; $b.rect.x),
+                segment_end: min_value($a_right; $b_right)
+            }
+        elif abs_value($b_bottom - $a.rect.y) <= 8 then
+            {
+                axis: "horizontal",
+                handle_y: (($b_bottom + $a.rect.y) / 2),
+                segment_start: max_value($a.rect.x; $b.rect.x),
+                segment_end: min_value($a_right; $b_right)
+            }
+        else
+            empty
+        end
+    '
+}
+
+_matching_split_json() {
+    local map_json="$1" axis="$2" pane_a="$3" pane_b="$4"
+    echo "$map_json" | jq -c \
+        --arg axis "$axis" \
+        --argjson a "$pane_a" \
+        --argjson b "$pane_b" '
+        def center_x(rect): rect.x + (rect.width / 2);
+        def center_y(rect): rect.y + (rect.height / 2);
+        [
+            .splits[]
+            | select(.axis == $axis)
+            | select(center_x($a.rect) >= .rect.x and center_x($a.rect) <= (.rect.x + .rect.width))
+            | select(center_y($a.rect) >= .rect.y and center_y($a.rect) <= (.rect.y + .rect.height))
+            | select(center_x($b.rect) >= .rect.x and center_x($b.rect) <= (.rect.x + .rect.width))
+            | select(center_y($b.rect) >= .rect.y and center_y($b.rect) <= (.rect.y + .rect.height))
+        ]
+        | sort_by(.rect.width * .rect.height)
+        | .[0]
+    '
+}
+
+cmd_resize_pane() {
+    [[ $# -ge 3 ]] || die "Usage: visual-qa resize-pane \"pane A\" \"pane B\" DELTA_PX"
+    require_session
+    local pane_a_title="$1" pane_b_title="$2" delta="$3"
+
+    local before_a before_b boundary
+    before_a=$(_unique_pane_json "$pane_a_title")
+    before_b=$(_unique_pane_json "$pane_b_title")
+    boundary=$(_shared_boundary_json "$before_a" "$before_b")
+    [[ -n "$boundary" ]] || die "Panes do not share a resize handle: \"$pane_a_title\" / \"$pane_b_title\""
+
+    local axis start_x start_y end_x end_y segment_start segment_end map_json split_json
+    axis=$(echo "$boundary" | jq -r '.axis')
+    segment_start=$(echo "$boundary" | jq -r '.segment_start')
+    segment_end=$(echo "$boundary" | jq -r '.segment_end')
+    map_json=$(_map_json)
+    split_json=$(_matching_split_json "$map_json" "$axis" "$before_a" "$before_b")
+
+    local handle_x="" handle_y="" split_rect_x="" split_rect_y="" split_rect_w="" split_rect_h=""
+    if [[ -n "$split_json" && "$split_json" != "null" ]]; then
+        split_rect_x=$(echo "$split_json" | jq -r '.rect.x')
+        split_rect_y=$(echo "$split_json" | jq -r '.rect.y')
+        split_rect_w=$(echo "$split_json" | jq -r '.rect.width')
+        split_rect_h=$(echo "$split_json" | jq -r '.rect.height')
+    fi
+
+    if [[ "$axis" == "vertical" ]]; then
+        local window_width
+        if [[ -n "$split_json" && "$split_json" != "null" ]]; then
+            handle_x=$(echo "$split_json" | jq -r '.rect.x + (.rect.width * .ratio)')
+        else
+            handle_x=$(echo "$boundary" | jq -r '.handle_x')
+        fi
+        window_width=$(echo "$map_json" | jq -r '.window_rect.width')
+        start_x=$(_round_int "$handle_x")
+        end_x=$(_clamp_int $(( start_x + delta )) 5 $(( $(_round_int "$window_width") - 5 )))
+    else
+        local window_height
+        if [[ -n "$split_json" && "$split_json" != "null" ]]; then
+            handle_y=$(echo "$split_json" | jq -r '.rect.y + (.rect.height * .ratio)')
+        else
+            handle_y=$(echo "$boundary" | jq -r '.handle_y')
+        fi
+        window_height=$(echo "$map_json" | jq -r '.window_rect.height')
+        start_y=$(_round_int "$handle_y")
+        end_y=$(_clamp_int $(( start_y + delta )) 5 $(( $(_round_int "$window_height") - 5 )))
+    fi
+
+    local before_handle after_handle after_a after_b after_boundary
+    if [[ "$axis" == "vertical" ]]; then
+        before_handle=$(echo "$boundary" | jq -r '.handle_x')
+    else
+        before_handle=$(echo "$boundary" | jq -r '.handle_y')
+    fi
+
+    local moved=false attempt_index
+    for attempt_index in 1 2 3; do
+        if [[ "$axis" == "vertical" ]]; then
+            case "$attempt_index" in
+                1) start_y=$(_round_int "$(echo "$split_rect_y $split_rect_h" | awk '{ print $1 + ($2 / 2) }')") ;;
+                2) start_y=$(_round_int "$(echo "$split_rect_y $split_rect_h" | awk '{ print $1 + ($2 * 0.25) }')") ;;
+                3) start_y=$(_round_int "$(echo "$split_rect_y $split_rect_h" | awk '{ print $1 + ($2 * 0.75) }')") ;;
+            esac
+            [[ -z "$split_rect_h" ]] && start_y=$(_round_int "$(awk -v a="$segment_start" -v b="$segment_end" 'BEGIN { print (a + b) / 2 }')")
+            end_y="$start_y"
+        else
+            case "$attempt_index" in
+                1) start_x=$(_round_int "$(echo "$split_rect_x $split_rect_w" | awk '{ print $1 + ($2 / 2) }')") ;;
+                2) start_x=$(_round_int "$(echo "$split_rect_x $split_rect_w" | awk '{ print $1 + ($2 * 0.25) }')") ;;
+                3) start_x=$(_round_int "$(echo "$split_rect_x $split_rect_w" | awk '{ print $1 + ($2 * 0.75) }')") ;;
+            esac
+            [[ -z "$split_rect_w" ]] && start_x=$(_round_int "$(awk -v a="$segment_start" -v b="$segment_end" 'BEGIN { print (a + b) / 2 }')")
+            end_x="$start_x"
+        fi
+
+        local platform display wid
+        platform=$(session_get platform)
+        case "$platform" in
+            linux)
+                display=$(session_display)
+                wid=$(session_get window_id)
+                DISPLAY="$display" xdotool windowfocus "$wid" 2>/dev/null || true
+                DISPLAY="$display" xdotool mousemove --window "$wid" "$start_x" "$start_y"
+                DISPLAY="$display" xdotool mousedown 1
+                sleep 0.1
+                DISPLAY="$display" xdotool mousemove --window "$wid" "$end_x" "$end_y"
+                sleep 0.1
+                DISPLAY="$display" xdotool mouseup 1
+                ;;
+            darwin)
+                cliclick "dd:$start_x,$start_y"
+                sleep 0.1
+                cliclick "dm:$end_x,$end_y"
+                sleep 0.1
+                cliclick "du:$end_x,$end_y"
+                ;;
+        esac
+        _invalidate_ocr_cache
+        sleep 0.3
+
+        after_a=$(_unique_pane_json "$pane_a_title")
+        after_b=$(_unique_pane_json "$pane_b_title")
+        after_boundary=$(_shared_boundary_json "$after_a" "$after_b")
+        [[ -n "$after_boundary" ]] || die "Resize succeeded but panes are no longer adjacent: \"$pane_a_title\" / \"$pane_b_title\""
+
+        if [[ "$axis" == "vertical" ]]; then
+            after_handle=$(echo "$after_boundary" | jq -r '.handle_x')
+        else
+            after_handle=$(echo "$after_boundary" | jq -r '.handle_y')
+        fi
+
+        if ! _float_close_enough "$before_handle" "$after_handle" 4; then
+            moved=true
+            break
+        fi
+    done
+
+    [[ "$moved" == "true" ]] || die "Resize handle did not move for \"$pane_a_title\" / \"$pane_b_title\""
+
+    jq -n \
+        --arg axis "$axis" \
+        --argjson before "$before_handle" \
+        --argjson after "$after_handle" \
+        --arg start_x "$start_x" \
+        --arg start_y "$start_y" \
+        --arg end_x "$end_x" \
+        --arg end_y "$end_y" \
+        '{
+            axis: $axis,
+            before_handle: $before,
+            after_handle: $after,
+            drag: {
+                start_x: ($start_x | tonumber),
+                start_y: ($start_y | tonumber),
+                end_x: ($end_x | tonumber),
+                end_y: ($end_y | tonumber)
+            }
+        }'
+}
+
+cmd_assert() {
+    [[ $# -ge 1 ]] || die "Usage: visual-qa assert <subcommand> [...]"
+    require_session
+
+    local subcmd="$1"; shift
+    case "$subcmd" in
+        pane-count)
+            [[ $# -ge 1 ]] || die "Usage: visual-qa assert pane-count N"
+            local expected actual
+            expected="$1"
+            actual=$(echo "$(_map_json)" | jq '.panes | length')
+            [[ "$actual" -eq "$expected" ]] ||
+                die "Expected $expected panes, found $actual"
+            ;;
+        window-size)
+            [[ $# -ge 2 ]] || die "Usage: visual-qa assert window-size WIDTH HEIGHT"
+            local expected_w expected_h actual_w actual_h
+            expected_w="$1"; expected_h="$2"
+            actual_w=$(echo "$(_map_json)" | jq '.window_rect.width | round')
+            actual_h=$(echo "$(_map_json)" | jq '.window_rect.height | round')
+            [[ "$actual_w" -eq "$expected_w" && "$actual_h" -eq "$expected_h" ]] ||
+                die "Expected window ${expected_w}x${expected_h}, found ${actual_w}x${actual_h}"
+            ;;
+        tab-present)
+            [[ $# -ge 1 ]] || die "Usage: visual-qa assert tab-present \"TITLE\""
+            local title count
+            title="$1"
+            count=$(echo "$(_map_json)" | jq --arg title "$title" '[.panes[].titles[] | select(. == $title)] | length')
+            [[ "$count" -gt 0 ]] || die "Tab not present in live map: \"$title\""
+            ;;
+        tab-in-pane)
+            [[ $# -ge 2 ]] || die "Usage: visual-qa assert tab-in-pane \"TAB\" \"PANE TITLE\""
+            local tab_title pane_title pane_json has_tab
+            tab_title="$1"; pane_title="$2"
+            pane_json=$(_unique_pane_json "$pane_title")
+            has_tab=$(echo "$pane_json" | jq --arg title "$tab_title" '(.titles | index($title)) != null')
+            [[ "$has_tab" == "true" ]] ||
+                die "Tab \"$tab_title\" not found in pane \"$pane_title\""
+            ;;
+        tab-order)
+            [[ $# -ge 2 ]] || die "Usage: visual-qa assert tab-order \"PANE\" \"TAB A\" \"TAB B\" [...]"
+            local pane_spec pane_json expected actual
+            pane_spec="$1"
+            shift
+            pane_json=$(_unique_pane_json "$pane_spec")
+            expected=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+            actual=$(echo "$pane_json" | jq '.titles')
+            [[ "$actual" == "$expected" ]] ||
+                die "Expected tab order $expected in pane \"$pane_spec\", found $actual"
+            ;;
+        pane-left-of|pane-right-of|pane-above|pane-below)
+            [[ $# -ge 2 ]] || die "Usage: visual-qa assert $subcmd \"PANE A\" \"PANE B\""
+            local pane_a pane_b rect_a rect_b
+            pane_a=$(_unique_pane_json "$1")
+            pane_b=$(_unique_pane_json "$2")
+            rect_a=$(echo "$pane_a" | jq '.rect')
+            rect_b=$(echo "$pane_b" | jq '.rect')
+            case "$subcmd" in
+                pane-left-of)
+                    jq -n -e --argjson a "$rect_a" --argjson b "$rect_b" '$a.x < $b.x' >/dev/null ||
+                        die "Pane \"$1\" is not left of \"$2\""
+                    ;;
+                pane-right-of)
+                    jq -n -e --argjson a "$rect_a" --argjson b "$rect_b" '$a.x > $b.x' >/dev/null ||
+                        die "Pane \"$1\" is not right of \"$2\""
+                    ;;
+                pane-above)
+                    jq -n -e --argjson a "$rect_a" --argjson b "$rect_b" '$a.y < $b.y' >/dev/null ||
+                        die "Pane \"$1\" is not above \"$2\""
+                    ;;
+                pane-below)
+                    jq -n -e --argjson a "$rect_a" --argjson b "$rect_b" '$a.y > $b.y' >/dev/null ||
+                        die "Pane \"$1\" is not below \"$2\""
+                    ;;
+            esac
+            ;;
+        maximized)
+            [[ $# -ge 1 ]] || die "Usage: visual-qa assert maximized \"PANE\""
+            local expected_pane map_json
+            expected_pane="$1"
+            map_json=$(_map_json)
+            jq -e --arg pane "$expected_pane" '
+                (.maximized_pane_id == $pane) or (.maximized_active_title == $pane)
+            ' <<<"$map_json" >/dev/null ||
+                die "Pane \"$expected_pane\" is not maximized"
+            ;;
+        not-maximized)
+            local map_json
+            map_json=$(_map_json)
+            jq -e '.maximized_pane_id == null and .maximized_active_title == null' <<<"$map_json" >/dev/null ||
+                die "Expected no maximized pane"
+            ;;
+        no-debug-overlay)
+            local tsv
+            tsv=$(_get_ocr_tsv)
+            if echo "$tsv" | grep -qiE 'Press|F12|debug metrics'; then
+                die "Detected debug overlay text in OCR output"
+            fi
+            ;;
+        *)
+            die "Unknown assert subcommand: $subcmd"
+            ;;
+    esac
+}
+
+cmd_drop_tab() {
+    [[ $# -ge 1 ]] || die "Usage: visual-qa drop-tab \"SOURCE\" (--edge EDGE | --pane PANE --region REGION [--after TAB])"
+    require_session
+
+    local src_name="$1"
+    shift
+    local edge="" pane_spec="" region="" after_tab=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --edge) edge="$2"; shift 2 ;;
+            --pane) pane_spec="$2"; shift 2 ;;
+            --region) region="$2"; shift 2 ;;
+            --after) after_tab="$2"; shift 2 ;;
+            *) die "Unknown option: $1" ;;
+        esac
+    done
+
+    local drop_x drop_y target_json
+    if [[ -n "$edge" ]]; then
+        target_json=$(_app_edge_target_json "$edge")
+        [[ -n "$target_json" && "$target_json" != "null" ]] || die "Unknown edge target: $edge"
+        read -r drop_x drop_y <<< "$(_center_of_rect "$(echo "$target_json" | jq -c '.rect')")"
+    else
+        [[ -n "$pane_spec" && -n "$region" ]] ||
+            die "Usage: visual-qa drop-tab \"SOURCE\" (--edge EDGE | --pane PANE --region REGION [--after TAB])"
+        target_json=$(_pane_drop_target_json "$pane_spec" "$region")
+        [[ -n "$target_json" && "$target_json" != "null" ]] || die "Pane target not found: \"$pane_spec\" region \"$region\""
+
+        if [[ "$region" == "tabbar" && -n "$after_tab" ]]; then
+            local pane_json anchor_x anchor_y min_drop max_drop
+            pane_json=$(_unique_pane_json "$pane_spec")
+            anchor_x=$(cmd_locate "$after_tab" 2>/dev/null | cut -d' ' -f1) || die "Anchor tab not found: \"$after_tab\""
+            anchor_y=$(cmd_locate "$after_tab" 2>/dev/null | cut -d' ' -f2) || die "Anchor tab not found: \"$after_tab\""
+            min_drop=$(_round_int "$(echo "$pane_json" | jq -r '.tab_bar_rect.x + 20')")
+            max_drop=$(_round_int "$(echo "$pane_json" | jq -r '.tab_bar_rect.x + .tab_bar_rect.width - 20')")
+            drop_x=$(_clamp_int $(( anchor_x + 80 )) "$min_drop" "$max_drop")
+            drop_y="$anchor_y"
+        else
+            read -r drop_x drop_y <<< "$(_center_of_rect "$(echo "$target_json" | jq -c '.rect')")"
+        fi
+    fi
+
+    _perform_tab_drag "$src_name" "$drop_x" "$drop_y"
+}
+
+cmd_reorder_tab() {
+    [[ $# -ge 2 ]] || die "Usage: visual-qa reorder-tab \"SOURCE\" \"ANCHOR\""
+    local src_name="$1" anchor="$2"
+    local pane_json pane_id
+    pane_json=$(_unique_pane_json "$anchor")
+    pane_id=$(echo "$pane_json" | jq -r '.pane_id')
+    cmd_drop_tab "$src_name" --pane "$pane_id" --region tabbar --after "$anchor"
+}
+
+cmd_tab_transfer() {
+    [[ $# -ge 2 ]] || die "Usage: visual-qa tab-transfer \"source tab\" \"target tab\""
+    local src_name="$1" tgt_name="$2"
+    local pane_json pane_id
+    pane_json=$(_unique_pane_json "$tgt_name")
+    pane_id=$(echo "$pane_json" | jq -r '.pane_id')
+    cmd_drop_tab "$src_name" --pane "$pane_id" --region tabbar --after "$tgt_name"
+}
+
+cmd_maximize() {
+    require_session
+    local tab_name="${1:-}"
+
+    # Find the tab to maximize
+    local tab_pos
+    if [[ -n "$tab_name" ]]; then
+        tab_pos=$(cmd_locate "$tab_name" 2>/dev/null) || die "Tab not found: \"$tab_name\""
+    else
+        # Default: maximize focused pane — use first tab in topmost tab bar
+        tab_pos=$(cmd_locate --all --y-range 25 70 2>/dev/null | head -1)
+        [[ -n "$tab_pos" ]] || die "No tabs found"
+    fi
+
+    local tx ty
+    tx=$(echo "$tab_pos" | cut -d' ' -f1); ty=$(echo "$tab_pos" | cut -d' ' -f2)
+
+    # Right-click → click "Maximize pane"
+    cmd_right_click "$tx" "$ty"
+    sleep 0.3
+    local max_pos
+    max_pos=$(cmd_locate "Maximize" 2>/dev/null) || die "Maximize menu item not found — pane may already be maximized"
+    cmd_click $(echo "$max_pos")
+    sleep 0.3
+}
+
+cmd_restore() {
+    require_session
+
+    # Find any visible tab, right-click → "Restore layout"
+    local tab_pos
+    tab_pos=$(cmd_locate --all --y-range 25 70 2>/dev/null | head -1)
+    [[ -n "$tab_pos" ]] || die "No tabs found"
+
+    local tx ty
+    tx=$(echo "$tab_pos" | cut -d' ' -f1); ty=$(echo "$tab_pos" | cut -d' ' -f2)
+
+    cmd_right_click "$tx" "$ty"
+    sleep 0.3
+    local rest_pos
+    rest_pos=$(cmd_locate "Restore" 2>/dev/null) || die "Restore menu item not found — layout may not be maximized"
+    cmd_click $(echo "$rest_pos")
+    sleep 0.3
+}
+
+cmd_cleanup() {
+    local screenshots_root="$ROOT_DIR/testdata/screenshots"
+    local keep="${1:-3}"  # Keep last N runs, default 3
+
+    if [[ ! -d "$screenshots_root" ]]; then
+        info "No screenshots directory"
+        return 0
+    fi
+
+    local dirs
+    dirs=$(ls -1d "$screenshots_root"/20* 2>/dev/null | sort -r)
+    local count=0
+    local removed=0
+    while IFS= read -r dir; do
+        [[ -z "$dir" ]] && continue
+        count=$((count + 1))
+        if [[ $count -gt $keep ]]; then
+            rm -rf "$dir"
+            removed=$((removed + 1))
+        fi
+    done <<< "$dirs"
+    info "Cleaned up $removed old screenshot runs (kept $keep)"
+}
+
+cmd_stop() {
+    if [[ ! -f "$SESSION_FILE" ]]; then
+        info "No active session"
+        return 0
+    fi
+
+    _invalidate_ocr_cache
+
+    # Helper: send signal and wait for process to exit (works across invocations)
+    _kill_and_wait() {
+        local pid="$1" sig="${2:-TERM}" label="${3:-process}"
+        if [[ -n "$pid" ]] && [[ "$pid" != "0" ]] && kill -0 "$pid" 2>/dev/null; then
+            kill "-$sig" "$pid" 2>/dev/null
+            local i=0
+            while kill -0 "$pid" 2>/dev/null && [[ $i -lt 20 ]]; do
+                sleep 0.1
+                i=$((i + 1))
+            done
+            # Force kill if still alive
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -9 "$pid" 2>/dev/null || true
+            fi
+            info "$label stopped"
+        fi
+    }
+
+    # Stop recording first (needs display alive to finalize)
+    local ffmpeg_pid
+    ffmpeg_pid=$(jq -r '.ffmpeg_pid // empty' "$SESSION_FILE" 2>/dev/null)
+    _kill_and_wait "$ffmpeg_pid" INT "Recording"
+
+    # Stop viewer
+    local viewer_pid
+    viewer_pid=$(jq -r '.viewer_pid // empty' "$SESSION_FILE" 2>/dev/null)
+    _kill_and_wait "$viewer_pid" TERM "Viewer"
+
+    # Kill app
+    local app_pid
+    app_pid=$(jq -r '.app_pid // empty' "$SESSION_FILE" 2>/dev/null)
+    _kill_and_wait "$app_pid" TERM "App"
+
+    # Kill Xvfb last (other processes depend on the display)
+    local xvfb_pid
+    xvfb_pid=$(jq -r '.xvfb_pid // empty' "$SESSION_FILE" 2>/dev/null)
+    _kill_and_wait "$xvfb_pid" TERM "Xvfb"
+
+    rm -f "$SESSION_FILE"
+    info "Session cleaned up"
+}
+
+# --- Main dispatch ---
+
+_usage() {
+    cat <<'EOF'
+Usage: visual-qa <command> [args...]
+
+Session:
+  setup                              Check/install dependencies
+  start [--build] [--size WxH] [--layout FILE]
+                                      Start Xvfb + app + OCR pre-warm
+  watch                              Open live viewer (ffplay)
+  stop                               Kill app + Xvfb, clean up
+  window-info                        Window geometry JSON
+  map                                Current live pane/split map JSON
+  status                             Session health JSON
+  doctor                             Dependency + session self-check
+
+Element Finding:
+  locate "text" [options]            OCR element finder → "X Y"
+    --all                            Return all matches
+    --near X Y                       Closest match to point
+    --y-range MIN MAX                Filter by vertical band
+    --conf N                         Min OCR confidence (default 50)
+  cursor-pos                         Current cursor position
+
+Interaction:
+  click X Y                          Left click
+  right-click X Y                    Right click
+  double-click X Y                   Double click
+  drag X1 Y1 X2 Y2 [--steps N]      Press → interpolate → release
+  mousedown X Y [--button N]         Press and hold
+  mouseup [--button N]               Release
+  move X Y                           Move cursor
+  key KEY                            Press key (xdotool names)
+  type "text"                        Type text
+
+High-Level:
+  resize-pane "A" "B" DELTA_PX       Resize adjacent panes using live map
+  assert <subcommand> [...]          Verify session state or UI invariants
+  drop-tab "source" ...              Drop a tab onto a live pane/edge target
+  reorder-tab "source" "anchor"      Reorder within a pane via live tab bar
+  tab-transfer "source" "target"     Drag source tab into target's tab bar
+  maximize ["tab name"]              Right-click tab → Maximize pane
+  restore                            Right-click tab → Restore layout
+
+Capture:
+  screenshot [--output PATH]         Capture current state
+  record start|stop                  Video capture via ffmpeg
+  baseline capture|check             Golden baseline management
+  cleanup [N]                        Remove old screenshot runs (keep N, default 3)
+EOF
+    exit 0
+}
+
+[[ $# -ge 1 ]] || _usage
+[[ "$1" == "--help" || "$1" == "-h" ]] && _usage
+
+cmd="$1"; shift
+case "$cmd" in
+    setup)        cmd_setup "$@" ;;
+    start)        cmd_start "$@" ;;
+    watch)        cmd_watch "$@" ;;
+    screenshot)   cmd_screenshot "$@" ;;
+    click)        cmd_click "$@" ;;
+    double-click) cmd_double_click "$@" ;;
+    right-click)  cmd_right_click "$@" ;;
+    drag)         cmd_drag "$@" ;;
+    mousedown)    cmd_mousedown "$@" ;;
+    mouseup)      cmd_mouseup "$@" ;;
+    move)         cmd_move "$@" ;;
+    key)          cmd_key "$@" ;;
+    type)         cmd_type "$@" ;;
+    window-info)  cmd_window_info "$@" ;;
+    map)          cmd_map "$@" ;;
+    status)       cmd_status "$@" ;;
+    doctor)       cmd_doctor "$@" ;;
+    record)       cmd_record "$@" ;;
+    baseline)     cmd_baseline "$@" ;;
+    locate)        cmd_locate "$@" ;;
+    cursor-pos)    cmd_cursor_pos "$@" ;;
+    resize-pane)   cmd_resize_pane "$@" ;;
+    assert)        cmd_assert "$@" ;;
+    drop-tab)      cmd_drop_tab "$@" ;;
+    reorder-tab)   cmd_reorder_tab "$@" ;;
+    tab-transfer)  cmd_tab_transfer "$@" ;;
+    maximize)      cmd_maximize "$@" ;;
+    restore)       cmd_restore "$@" ;;
+    cleanup)       cmd_cleanup "$@" ;;
+    stop)          cmd_stop "$@" ;;
+    *)             die "Unknown command: $cmd" ;;
+esac

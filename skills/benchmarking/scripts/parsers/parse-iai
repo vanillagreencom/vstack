@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# Parse iai-callgrind stdout and record to benchmark pipeline (schema v3)
+#
+# Usage: cargo bench --features iai --bench iai_benchmarks 2>&1 | parse-iai [--dry-run]
+#
+# Reads iai-callgrind output from stdin, extracts benchmark names and Ir counts,
+# maps to components, and records via bench.sh record.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+BENCH_SH="$SCRIPT_DIR/../bench.sh"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+DRY_RUN=false
+
+usage() {
+    cat <<EOF
+Parse iai-callgrind benchmark stdout and record to benchmark pipeline (schema v3).
+
+Usage: cargo bench --features iai --bench iai_benchmarks 2>&1 | parse-iai [options]
+
+Options:
+    --dry-run       Parse and display without recording
+    -h, --help      Show this help
+
+The parser extracts from iai-callgrind output:
+    - operation: Benchmark function name (prefixed with "iai/")
+    - instruction_count (Ir): Primary deterministic metric
+    - estimated_cycles: Secondary metric
+
+Results are emitted as schema v3 JSON.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo -e "${RED}Error: Unknown argument: $1${NC}" >&2; usage >&2; exit 1 ;;
+    esac
+done
+
+# Component map — maps bench function name to result component directory.
+# Override: set BENCH_COMPONENT_MAP to a file defining map_component(),
+# or place benchmarks/component-map.sh in project root.
+_default_map_component() {
+    local name="$1"
+    # Default: use the function name itself as the component
+    echo "$name"
+}
+
+_map_file="${BENCH_COMPONENT_MAP:-${PROJECT_ROOT}/benchmarks/component-map.sh}"
+if [[ -f "$_map_file" ]]; then
+    source "$_map_file"
+elif ! declare -f map_component &>/dev/null; then
+    map_component() { _default_map_component "$@"; }
+fi
+
+recorded=0
+failures=0
+current_bench=""
+current_ir=""
+current_cycles=""
+
+while IFS= read -r line; do
+    clean=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    [[ -z "$clean" ]] && continue
+
+    # Detect benchmark header: "iai_benchmarks::group_name::bench_function"
+    if [[ "$clean" =~ ^iai_benchmarks::([a-z_]+)::([a-z_]+)$ ]]; then
+        current_bench="${BASH_REMATCH[2]}"
+        current_ir=""
+        current_cycles=""
+        continue
+    fi
+
+    # Detect Instructions line: "Instructions:  1353|1353  (No change)"
+    if [[ -n "$current_bench" && "$clean" =~ ^Instructions:[[:space:]]+([0-9,]+)\| ]]; then
+        current_ir="${BASH_REMATCH[1]//,/}"
+        continue
+    fi
+
+    # Detect EstimatedCycles line
+    if [[ -n "$current_bench" && "$clean" =~ ^Estimated\ Cycles:[[:space:]]+([0-9,]+)\| ]]; then
+        current_cycles="${BASH_REMATCH[1]//,/}"
+
+        if [[ -n "$current_ir" ]]; then
+            component=$(map_component "$current_bench")
+
+            if [[ -z "$component" ]]; then
+                echo -e "${YELLOW}Warning: Unknown benchmark '$current_bench', skipping${NC}" >&2
+                current_bench=""
+                continue
+            fi
+
+            echo -e "${GREEN}Benchmark:${NC} $current_bench"
+            echo "  Component: $component, Ir: $current_ir, EstCycles: ${current_cycles:-0}"
+
+            if [[ "$DRY_RUN" == "false" ]]; then
+                json_payload=$(jq -n \
+                    --arg op "iai/$current_bench" \
+                    --arg comp "$component" \
+                    --argjson ir "$current_ir" \
+                    --argjson cycles "${current_cycles:-0}" \
+                    '{
+                        schema_version: 3,
+                        component: $comp,
+                        operation: $op,
+                        tool: { name: "iai-callgrind", version: "0.16.1" },
+                        measurements: [
+                            {
+                                metric_kind: "instruction_count",
+                                unit: "instructions",
+                                summary: { estimate: { stat: "Ir", value: $ir } }
+                            },
+                            {
+                                metric_kind: "estimated_cycles",
+                                unit: "cycles",
+                                summary: { estimate: { stat: "EstimatedCycles", value: $cycles } }
+                            }
+                        ]
+                    }')
+
+                if "$BENCH_SH" record "$component" "$json_payload"; then
+                    recorded=$((recorded + 1))
+                else
+                    echo -e "${RED}Warning: Failed to record '$current_bench'${NC}" >&2
+                    failures=$((failures + 1))
+                fi
+            else
+                recorded=$((recorded + 1))
+            fi
+        fi
+
+        current_bench=""
+        continue
+    fi
+done
+
+echo ""
+
+if [[ "$recorded" -eq 0 ]]; then
+    echo -e "${RED}Error: No benchmarks parsed from stdin${NC}" >&2
+    echo "Ensure iai-callgrind output is piped in:" >&2
+    echo "  cargo bench --features iai --bench iai_benchmarks 2>&1 | parse-iai" >&2
+    exit 1
+fi
+
+if [[ "$failures" -gt 0 ]]; then
+    echo -e "${RED}Error: $failures benchmark(s) failed to record${NC}" >&2
+    echo "Parsed $recorded benchmark(s), $failures failed"
+    exit 1
+fi
+
+echo "Parsed $recorded benchmark(s)"
+if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e "${YELLOW}Dry run complete. Use without --dry-run to record results.${NC}"
+else
+    echo -e "${GREEN}Results recorded (schema v3).${NC}"
+    echo "Run 'bench.sh list' to verify."
+fi

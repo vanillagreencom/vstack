@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# Parse Criterion benchmark stdout and record to benchmark pipeline (schema v3)
+#
+# Usage: cargo bench 2>&1 | parse-criterion [--dry-run]
+#
+# Reads Criterion output from stdin, extracts operation names and timing values,
+# maps to components, and records via bench.sh record.
+#
+# Component mapping: override via BENCH_COMPONENT_MAP (path to a shell function file)
+# or provide a benchmarks/component-map.sh in project root.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+BENCH_SH="$SCRIPT_DIR/../bench.sh"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+DRY_RUN=false
+
+usage() {
+    cat <<EOF
+Parse Criterion benchmark stdout and record to benchmark pipeline (schema v3).
+
+Usage: cargo bench 2>&1 | parse-criterion [options]
+
+Options:
+    --dry-run       Parse and display without recording
+    -h, --help      Show this help
+
+The parser extracts from Criterion output:
+    - operation: Benchmark name (e.g., "tick-buffer-drain/drain_10")
+    - wall_time mean: Criterion estimated mean (not a true percentile)
+    - confidence_interval: [low, high] of mean CI
+
+Results are emitted as schema v3 JSON.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dry-run) DRY_RUN=true; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo -e "${RED}Error: Unknown argument: $1${NC}" >&2; usage >&2; exit 1 ;;
+    esac
+done
+
+# Component map — maps benchmark group prefix to result component directory.
+# Override: set BENCH_COMPONENT_MAP to a file defining map_component(),
+# or place benchmarks/component-map.sh in project root.
+_default_map_component() {
+    local prefix="$1"
+    # Default: use the prefix itself as the component name
+    echo "$prefix"
+}
+
+# Load project-specific map if available
+_map_file="${BENCH_COMPONENT_MAP:-${PROJECT_ROOT}/benchmarks/component-map.sh}"
+if [[ -f "$_map_file" ]]; then
+    source "$_map_file"
+elif ! declare -f map_component &>/dev/null; then
+    map_component() { _default_map_component "$@"; }
+fi
+
+# Convert value+unit to nanoseconds
+to_nanoseconds() {
+    local value="$1"
+    local unit="$2"
+    case "$unit" in
+        ps)       awk "BEGIN { printf \"%.4f\", $value * 0.001 }" ;;
+        ns)       awk "BEGIN { printf \"%.4f\", $value * 1 }" ;;
+        µs|us)    awk "BEGIN { printf \"%.4f\", $value * 1000 }" ;;
+        ms)       awk "BEGIN { printf \"%.4f\", $value * 1000000 }" ;;
+        s)        awk "BEGIN { printf \"%.4f\", $value * 1000000000 }" ;;
+        *)
+            echo -e "${RED}Warning: Unknown unit '$unit', assuming ns${NC}" >&2
+            awk "BEGIN { printf \"%.4f\", $value * 1 }" ;;
+    esac
+}
+
+recorded=0
+failures=0
+current_op=""
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+    # Strip ANSI escape codes and leading/trailing whitespace
+    clean=$(echo "$line" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+    [[ -z "$clean" ]] && continue
+
+    # Detect time: data — two formats:
+    # 1. Standalone:  time:   [383.38 ps 383.47 ps 383.57 ps]
+    # 2. Inline with name: struct-copy/Quote_48B   time:   [8.6866 ns 8.6891 ns 8.6917 ns]
+    time_inner=""
+    if [[ "$clean" =~ time:[[:space:]]*\[(.+)\]$ ]]; then
+        time_inner="${BASH_REMATCH[1]}"
+        inline_prefix=$(echo "${clean%%time:*}" | sed 's/[[:space:]]*$//')
+        if [[ -n "$inline_prefix" && "$inline_prefix" =~ / ]]; then
+            current_op="$inline_prefix"
+        fi
+    fi
+
+    if [[ -n "$time_inner" ]]; then
+        # Parse three value+unit pairs: low mean high
+        read -r low_val low_unit mean_val mean_unit high_val high_unit <<< \
+            "$(echo "$time_inner" | awk '{print $1, $2, $3, $4, $5, $6}')"
+
+        if [[ -z "$current_op" || -z "$mean_val" || -z "$high_val" ]]; then
+            continue
+        fi
+
+        # Convert to nanoseconds
+        low_ns=$(to_nanoseconds "$low_val" "$low_unit")
+        mean_ns=$(to_nanoseconds "$mean_val" "$mean_unit")
+        high_ns=$(to_nanoseconds "$high_val" "$high_unit")
+
+        # Extract group prefix (before first '/')
+        prefix="${current_op%%/*}"
+        component=$(map_component "$prefix")
+
+        if [[ -z "$component" ]]; then
+            echo -e "${YELLOW}Warning: Unknown prefix '$prefix' for '$current_op', skipping${NC}" >&2
+            current_op=""
+            continue
+        fi
+
+        echo -e "${GREEN}Benchmark:${NC} $current_op"
+        echo "  Component: $component, mean: ${mean_ns}ns, CI: [${low_ns}, ${high_ns}]ns"
+
+        if [[ "$DRY_RUN" == "false" ]]; then
+            json_payload=$(jq -n \
+                --arg op "$current_op" \
+                --arg comp "$component" \
+                --argjson mean "$mean_ns" \
+                --argjson low "$low_ns" \
+                --argjson high "$high_ns" \
+                '{
+                    schema_version: 3,
+                    component: $comp,
+                    operation: $op,
+                    tool: { name: "criterion", version: "0.5" },
+                    measurements: [
+                        {
+                            metric_kind: "wall_time",
+                            unit: "ns",
+                            summary: {
+                                estimate: { stat: "mean", value: $mean },
+                                confidence_interval: { level: 0.95, lower: $low, upper: $high }
+                            }
+                        }
+                    ]
+                }')
+
+            if "$BENCH_SH" record "$component" "$json_payload"; then
+                recorded=$((recorded + 1))
+            else
+                echo -e "${RED}Warning: Failed to record '$current_op'${NC}" >&2
+                failures=$((failures + 1))
+            fi
+        else
+            recorded=$((recorded + 1))
+        fi
+
+        current_op=""
+        continue
+    fi
+
+    # Detect operation name
+    if [[ ! "$clean" =~ ^(time:|thrpt:|change:|Found|Benchmarking|Gnuplot|Collecting|Analyzing|Warning|Performance) ]] \
+        && [[ "$clean" =~ / ]] \
+        && [[ ! "$clean" =~ ^[[:space:]] ]]; then
+        current_op="$clean"
+    fi
+done
+
+echo ""
+
+if [[ "$recorded" -eq 0 ]]; then
+    echo -e "${RED}Error: No benchmarks parsed from stdin${NC}" >&2
+    echo "Ensure Criterion output is piped in: cargo bench 2>&1 | parse-criterion" >&2
+    exit 1
+fi
+
+if [[ "$failures" -gt 0 ]]; then
+    echo -e "${RED}Error: $failures benchmark(s) failed to record${NC}" >&2
+    echo "Parsed $recorded benchmark(s), $failures failed"
+    exit 1
+fi
+
+echo "Parsed $recorded benchmark(s)"
+if [[ "$DRY_RUN" == "true" ]]; then
+    echo -e "${YELLOW}Dry run complete. Use without --dry-run to record results.${NC}"
+else
+    echo -e "${GREEN}Results recorded (schema v3).${NC}"
+    echo "Run 'bench.sh list' to verify."
+fi

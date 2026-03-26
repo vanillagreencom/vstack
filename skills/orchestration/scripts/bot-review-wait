@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# Wait for bot review(s) to complete on a PR
+# Supports multiple bot reviewers (e.g., claude bot + codex bot)
+#
+# Usage: bot-review-wait <PR#> [poll_interval] [max_wait] [--json] [--reviewers "bot1,bot2"]
+#
+# Environment:
+#   GIT_HOST_CLI     - Path to git host CLI script (e.g., github.sh)
+#   BOT_REVIEWERS    - Comma-separated bot usernames (fallback if --reviewers not passed)
+#                      Default: auto-detect from PR reviews
+#
+# Phases:
+#   1. Poll CI checks AND sticky/review verdicts in parallel (max 60s)
+#   2. Poll verdicts from all reviewers until all terminal or timeout
+#   3. Verify no pending inline threads (bots may still be posting)
+#
+# Flags:
+#   --json                     Emit JSON result
+#   --reviewers "bot1,bot2"    Wait for these specific reviewers
+#
+# Exit codes:
+#   0 - All bot reviews complete
+#   1 - Timeout (max_wait exceeded, best-known verdicts returned)
+#   2 - Partial timeout (some reviewers terminal, others still pending)
+set -euo pipefail
+
+# Require GIT_HOST_CLI
+if [[ -z "${GIT_HOST_CLI:-}" ]]; then
+  echo "Error: GIT_HOST_CLI not set. Set to path of git host CLI script." >&2
+  exit 1
+fi
+
+# Parse args: flags can appear anywhere
+JSON_OUTPUT=false
+REVIEWERS_ARG=""
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --json) JSON_OUTPUT=true; shift ;;
+    --reviewers) REVIEWERS_ARG="$2"; shift 2 ;;
+    *) POSITIONAL+=("$1"); shift ;;
+  esac
+done
+
+PR_NUM="${POSITIONAL[0]:?Usage: bot-review-wait <PR#> [poll_interval] [max_wait] [--json] [--reviewers \"bot1,bot2\"]}"
+POLL_INTERVAL="${POSITIONAL[1]:-15}"
+MAX_WAIT="${POSITIONAL[2]:-600}"
+
+# Resolve reviewer list: --reviewers flag > $BOT_REVIEWERS env > auto-detect
+if [[ -n "$REVIEWERS_ARG" ]]; then
+  IFS=',' read -ra REVIEWERS <<< "$REVIEWERS_ARG"
+elif [[ -n "${BOT_REVIEWERS:-}" ]]; then
+  IFS=',' read -ra REVIEWERS <<< "$BOT_REVIEWERS"
+else
+  # Auto-detect: find bot users who have posted reviews on this PR
+  REVIEWERS=()
+  while IFS= read -r bot; do
+    [[ -n "$bot" ]] && REVIEWERS+=("$bot")
+  done < <(gh api "repos/{owner}/{repo}/pulls/$PR_NUM/reviews" --jq '[.[].user.login | select(endswith("[bot]"))] | unique | .[]' 2>/dev/null || true)
+  # Fallback: if no bot reviews yet, wait for any
+  if [[ ${#REVIEWERS[@]} -eq 0 ]]; then
+    REVIEWERS=("*")  # Wildcard: accept any bot
+  fi
+fi
+
+PHASE1_MAX=60      # Max seconds for CI pre-check
+# Phase 3: how long to wait for checklist completion after a terminal verdict.
+# Large PRs can take several minutes for the bot to post all inline threads.
+# 300s gives ~5 min of runway before signalling checklist_timeout to caller.
+PHASE3_MAX=300
+PHASE3_INTERVAL=10 # Poll interval for checklist check
+elapsed=0
+verdict="pending"
+
+# Check if sticky body has unchecked checklist items (- [ ])
+# Returns 0 if all items checked (or no checklist), 1 if unchecked items remain
+sticky_checklist_done() {
+  local body
+  body=$("$GIT_HOST_CLI" sticky-comment "$PR_NUM" --body 2>/dev/null || echo "")
+  if [ -z "$body" ]; then
+    return 0  # No sticky = nothing to wait for
+  fi
+  # Count unchecked items: "- [ ]" pattern
+  local unchecked
+  unchecked=$(echo "$body" | grep -c '^\s*- \[ \]' || true)
+  [ "$unchecked" -eq 0 ]
+}
+
+# Phase 3: Wait for sticky checklist to complete after verdict is terminal.
+# Bot posts verdict early but may still be posting inline threads (unchecked items).
+#
+# Returns:
+#   0 - checklist complete (all items checked or no checklist)
+#   1 - timed out waiting for checklist (bot still posting)
+wait_for_checklist() {
+  local p3_elapsed=0
+  local remaining=$((MAX_WAIT - elapsed))
+  local p3_max=$PHASE3_MAX
+  if [ $p3_max -gt $remaining ]; then
+    p3_max=$remaining
+  fi
+
+  while [ $p3_elapsed -lt $p3_max ]; do
+    if sticky_checklist_done; then
+      return 0
+    fi
+    if ! $JSON_OUTPUT; then
+      echo "Waiting for bot to finish posting threads..." >&2
+    fi
+    sleep "$PHASE3_INTERVAL"
+    p3_elapsed=$((p3_elapsed + PHASE3_INTERVAL))
+    elapsed=$((elapsed + PHASE3_INTERVAL))
+  done
+
+  # Timed out waiting for checklist
+  if sticky_checklist_done; then
+    return 0  # Completed just before we checked
+  fi
+  return 1
+}
+
+emit_result() {
+  local status="$1"
+  # Refresh verdict after checklist wait (checks formal review + sticky fallback)
+  verdict=$("$GIT_HOST_CLI" sticky-comment "$PR_NUM" --verdict 2>/dev/null || echo "$verdict")
+
+  # Collect per-reviewer status
+  local reviewer_json="[]"
+  for r in "${REVIEWERS[@]}"; do
+    [[ "$r" == "*" ]] && continue
+    local r_verdict
+    r_verdict=$(gh api "repos/{owner}/{repo}/pulls/$PR_NUM/reviews" \
+      --jq "[.[] | select(.user.login == \"$r\")] | last | .state // \"pending\"" 2>/dev/null || echo "pending")
+    reviewer_json=$(echo "$reviewer_json" | jq --arg name "$r" --arg v "$r_verdict" '. + [{"reviewer":$name,"verdict":$v}]')
+  done
+
+  if $JSON_OUTPUT; then
+    jq -n --arg s "$status" --arg v "$verdict" --argjson reviewers "$reviewer_json" \
+      '{"status":$s,"verdict":$v,"reviewers":$reviewers}'
+  else
+    case "$status" in
+      complete)
+        echo "Bot reviews complete (verdict: $verdict, reviewers: ${REVIEWERS[*]})" >&2
+        ;;
+      checklist_timeout)
+        echo "Bot review verdict received (${verdict}) but still posting threads after ${PHASE3_MAX}s." >&2
+        ;;
+      timeout)
+        echo "Bot review timeout after ${MAX_WAIT}s (verdict: $verdict, reviewers: ${REVIEWERS[*]})" >&2
+        ;;
+    esac
+  fi
+}
+
+# --- Phase 1: CI pre-check + sticky verdict ---
+# Check both CI status and sticky verdict each iteration
+phase1_end=$((elapsed + PHASE1_MAX))
+if [ $phase1_end -gt $MAX_WAIT ]; then
+  phase1_end=$MAX_WAIT
+fi
+
+# BOT_CHECK_NAME: name of the CI check to monitor (default: "claude")
+BOT_CHECK_NAME="${BOT_CHECK_NAME:-claude}"
+
+while [ $elapsed -lt $phase1_end ]; do
+  check_lines=$(gh pr checks "$PR_NUM" 2>&1 | grep -E "^\s*${BOT_CHECK_NAME}\s" || true)
+
+  if [ -n "$check_lines" ]; then
+    if echo "$check_lines" | grep -qE '\bpass\b'; then
+      verdict=$("$GIT_HOST_CLI" sticky-comment "$PR_NUM" --verdict 2>/dev/null || echo "pending")
+      if wait_for_checklist; then
+        emit_result "complete"
+        exit 0
+      else
+        emit_result "checklist_timeout"
+        exit 2
+      fi
+    elif echo "$check_lines" | grep -qE '\bfail\b'; then
+      verdict=$("$GIT_HOST_CLI" sticky-comment "$PR_NUM" --verdict 2>/dev/null || echo "pending")
+      if wait_for_checklist; then
+        emit_result "complete"
+        exit 0
+      else
+        emit_result "checklist_timeout"
+        exit 2
+      fi
+    fi
+    # All skipping (no pending/pass/fail) → bot won't run
+    if ! echo "$check_lines" | grep -qE '\bpending\b'; then
+      if $JSON_OUTPUT; then
+        jq -n '{"status":"complete","verdict":"pending"}'
+      else
+        echo "Bot review skipped" >&2
+      fi
+      exit 0
+    fi
+  fi
+  # No check found or still pending — also check sticky verdict
+  # Bot may post its review verdict before CI check resolves
+  verdict=$("$GIT_HOST_CLI" sticky-comment "$PR_NUM" --verdict 2>/dev/null || echo "pending")
+  if [[ "$verdict" == "approved" || "$verdict" == "changes" ]]; then
+    if wait_for_checklist; then
+      emit_result "complete"
+      exit 0
+    else
+      emit_result "checklist_timeout"
+      exit 2
+    fi
+  fi
+
+  sleep "$POLL_INTERVAL"
+  elapsed=$((elapsed + POLL_INTERVAL))
+done
+
+# --- Phase 2: Sticky verdict polling ---
+# CI check didn't resolve in phase 1; poll verdict directly
+while [ $elapsed -lt $MAX_WAIT ]; do
+  verdict=$("$GIT_HOST_CLI" sticky-comment "$PR_NUM" --verdict 2>/dev/null || echo "pending")
+
+  if [[ "$verdict" == "approved" || "$verdict" == "changes" ]]; then
+    # Phase 3: verdict is terminal but bot may still be posting threads
+    if wait_for_checklist; then
+      emit_result "complete"
+      exit 0
+    else
+      # Checklist didn't finish in PHASE3_MAX seconds.
+      # Signal checklist_timeout so caller can prompt user.
+      emit_result "checklist_timeout"
+      exit 2
+    fi
+  fi
+
+  sleep "$POLL_INTERVAL"
+  elapsed=$((elapsed + POLL_INTERVAL))
+done
+
+# --- Timeout: one final verdict check ---
+verdict=$("$GIT_HOST_CLI" sticky-comment "$PR_NUM" --verdict 2>/dev/null || echo "pending")
+
+emit_result "timeout"
+exit 1

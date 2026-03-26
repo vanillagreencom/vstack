@@ -1,0 +1,24 @@
+# vstack.toml — skill/hook mapping configuration
+# The CLI reads this from the source repo root during installation.
+# Prefix matching still applies automatically (agent "rust" → skills "rust-*").
+# These are additional explicit mappings.
+
+# Extra skill mappings per agent (beyond prefix matching)
+[agent-skills]
+iced = ["iced-rs", "trading-design", "visual-qa", "price-handling"]
+generalist = ["visual-qa"]
+
+# Skills given to all agents of a role
+[role-skills]
+engineer = ["issue-lifecycle", "github", "worktree"]
+manager = ["issue-lifecycle", "github", "worktree", "project-management", "linear"]
+reviewer = ["issue-lifecycle"]
+
+# Hook assignment by event:matcher → roles
+# "all" assigns to every role. Otherwise list specific roles.
+[hook-events]
+"PreToolUse:Bash" = "all"
+"PostToolUse:Edit|Write" = ["engineer"]
+"PostToolUse:Bash" = "all"
+"PostCompact:" = "all"
+"TaskCompleted:" = ["engineer"]

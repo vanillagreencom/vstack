@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# Decision lookup tool — search, query, and manage architectural decision documents.
+#
+# Usage:
+#   decisions search "FFI error handling"       Ranked keyword search (AND, scored)
+#   decisions search --issue PROJ-189            Find decisions linked to an issue
+#   decisions search "seqlock|mmap"             Regex OR (pipe = regex mode)
+#   decisions list                              List all active decisions (compact)
+#   decisions next-id                           Get next available DXXX
+#   decisions get D017                          Get decision details
+#
+# Environment:
+#   DECISIONS_DIR    Path to decision documents directory (required)
+#                    Example: docs/decisions
+#
+# Options:
+#   --limit N        Max results for search (default: 5)
+#
+# Output:
+#   search:   JSON array [{id, decision, path}] (keyword adds score field)
+#   list:     JSON array [{id, decision, path}] of active decisions
+#   next-id:  Single line "DXXX"
+#   get:      JSON {id, decision, status, date, path}
+#
+set -euo pipefail
+
+# --- Prerequisites ------------------------------------------------------------
+
+if ! command -v jq &>/dev/null; then
+  echo "Error: jq is required but not installed" >&2
+  exit 1
+fi
+
+# --- Configuration -----------------------------------------------------------
+
+DECISIONS_DIR="${DECISIONS_DIR:?DECISIONS_DIR must be set to the decision documents directory}"
+
+if [[ ! -d "$DECISIONS_DIR" ]]; then
+  echo "Error: DECISIONS_DIR '$DECISIONS_DIR' does not exist" >&2
+  exit 1
+fi
+
+INDEX_FILE="$DECISIONS_DIR/INDEX.md"
+
+if [[ ! -f "$INDEX_FILE" ]]; then
+  echo "Error: INDEX.md not found in '$DECISIONS_DIR'" >&2
+  exit 1
+fi
+
+# --- Helpers ------------------------------------------------------------------
+
+trim() { echo "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+
+# Parse the INDEX.md table into JSON
+parse_index() {
+  if [[ ! -f "$INDEX_FILE" ]]; then
+    echo '[]'
+    return
+  fi
+  local rows
+  rows=$(grep -E '^\| [0-9]{4}-' "$INDEX_FILE" || true)
+  if [[ -z "$rows" ]]; then
+    echo '[]'
+    return
+  fi
+  echo "$rows" | while IFS='|' read -r _ date id research decision rationale revisit status link _; do
+    id=$(trim "$id")
+    research=$(trim "$research")
+    decision=$(trim "$decision")
+    rationale=$(trim "$rationale")
+    status=$(trim "$status")
+    local path=""
+    path=$(echo "$link" | grep -oP '\(([^)]+)\)' | head -1 | tr -d '()' || true)
+    # Make path relative to DECISIONS_DIR so agents can read it directly
+    if [[ -n "$path" ]]; then path="$DECISIONS_DIR/$path"; fi
+
+    jq -n \
+      --arg id "$id" \
+      --arg research "$research" \
+      --arg decision "$decision" \
+      --arg rationale "$rationale" \
+      --arg status "$status" \
+      --arg path "$path" \
+      '{id: $id, research: $research, decision: $decision, rationale: $rationale, status: $status, path: $path}'
+  done | jq -s '.'
+}
+
+# --- Commands -----------------------------------------------------------------
+
+show_help() {
+  cat << 'EOF'
+Decision Lookup Tool
+
+Usage: decisions <action> [options]
+
+Actions:
+  search <query>       Ranked search (multi-word = AND, scored by relevance)
+  search --issue ID    Find decisions linked to a specific issue
+  list                 List all active decisions (compact)
+  next-id              Get next available DXXX
+  get <DXXX>           Get decision details (status, date, path)
+
+Options:
+  --limit N            Max results (default: 5)
+
+Output: JSON arrays or objects
+  search:  [{id, decision, path}] (keyword mode adds score field)
+  list:    [{id, decision, path}]
+  get:     {id, decision, status, date, path}
+
+Search scoring:
+  - Title/decision match: 3 points per term
+  - ID match: 3 points per term
+  - Rationale match: 1 point per term
+  - All terms must match (AND logic) unless query contains |
+
+Environment:
+  DECISIONS_DIR    Path to decision documents directory (required)
+
+Examples:
+  decisions search "FFI error handling"    # Top decisions about FFI errors
+  decisions search "ring buffer"           # Ring buffer decisions
+  decisions search --issue PROJ-189         # All decisions from PROJ-189
+  decisions search "seqlock|mmap"          # Regex OR (pipe = regex mode)
+  decisions search "FFI" --limit 3         # Limit results
+  decisions list                           # All active decisions
+  decisions next-id                        # Next available DXXX
+  decisions get D017                       # Details for D017
+EOF
+}
+
+search_decisions() {
+  local query=""
+  local issue=""
+  local limit=5
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --issue) issue="$2"; shift 2 ;;
+      --issue=*) issue="${1#--issue=}"; shift ;;
+      --limit) limit="$2"; shift 2 ;;
+      --limit=*) limit="${1#--limit=}"; shift ;;
+      *) query="$1"; shift ;;
+    esac
+  done
+
+  local all
+  all=$(parse_index)
+
+  if [[ -n "$issue" ]]; then
+    # Issue search: exact match on Research column, compact output
+    # Negative lookahead prevents PROJ-18 matching PROJ-189
+    echo "$all" | jq --arg issue "$issue" '[
+      .[] | select(.research | test($issue + "(?![0-9])"; "i")) |
+      {id, decision, path}
+    ]'
+  elif [[ -n "$query" ]]; then
+    # Check if query contains regex operators — if so, use raw regex mode
+    if echo "$query" | grep -qE '[|()\\]'; then
+      echo "$all" | jq --arg q "$query" --argjson limit "$limit" '[
+        .[] | select(
+          (.decision | test($q; "i")) or
+          (.rationale | test($q; "i")) or
+          (.id | test($q; "i"))
+        ) | {id, decision, path}
+      ] | .[:$limit]'
+    else
+      # Multi-word AND search with relevance scoring
+      echo "$all" | jq --arg q "$query" --argjson limit "$limit" '
+        # Split query into terms
+        ($q | ascii_downcase | split(" ") | map(select(length > 0))) as $terms |
+
+        [.[] |
+          # Check ALL terms match somewhere (AND logic)
+          . as $row |
+          ($row.decision + " " + $row.rationale + " " + $row.id | ascii_downcase) as $all_text |
+          if ($terms | all(. as $t | $all_text | test($t))) then
+            # Score: title match = 3pts, id match = 3pts, rationale = 1pt per term
+            ($row.decision | ascii_downcase) as $title |
+            ($row.id | ascii_downcase) as $did |
+            ($row.rationale | ascii_downcase) as $rat |
+            ([$terms[] | . as $t |
+              (if ($title | test($t)) then 3 else 0 end) +
+              (if ($did | test($t)) then 3 else 0 end) +
+              (if ($rat | test($t)) then 1 else 0 end)
+            ] | add) as $score |
+            {id: $row.id, decision: $row.decision, path: $row.path, score: $score}
+          else empty end
+        ] | sort_by(-.score) | .[:$limit]
+      '
+    fi
+  else
+    echo '{"error": "Provide a search query or --issue ID"}' >&2
+    return 1
+  fi
+}
+
+list_decisions() {
+  local all
+  all=$(parse_index)
+  echo "$all" | jq '[.[] | select(.status | startswith("Active")) | {id, decision, path}]'
+}
+
+cmd_next_id() {
+  local max_num=0
+
+  while IFS= read -r num; do
+    # Force base-10 interpretation (strip leading zeros that bash treats as octal)
+    local decimal=$((10#$num))
+    if [[ "$decimal" -gt "$max_num" ]]; then
+      max_num="$decimal"
+    fi
+  done < <(grep -oP 'D(\d+)' "$INDEX_FILE" | grep -oP '\d+' | sort -n || true)
+
+  printf "D%03d\n" $((max_num + 1))
+}
+
+cmd_get() {
+  local id="${1:?Usage: decisions get <DECISION_ID>}"
+
+  local all
+  all=$(parse_index)
+
+  local match
+  match=$(echo "$all" | jq --arg id "$id" '[.[] | select(.id == $id)] | .[0] // empty')
+
+  if [[ -z "$match" || "$match" == "null" ]]; then
+    echo "Error: Decision $id not found" >&2
+    exit 1
+  fi
+
+  # Enrich with date from decision file
+  local path
+  path=$(echo "$match" | jq -r '.path')
+  local date="unknown"
+  if [[ -f "$path" ]]; then
+    date=$(grep -P '^\*\*Date\*\*:' "$path" | head -1 | sed 's/\*\*Date\*\*: //' || echo "unknown")
+  fi
+
+  echo "$match" | jq --arg date "$date" '. + {date: $date}'
+}
+
+# --- Main ---------------------------------------------------------------------
+
+action="${1:-help}"
+shift || true
+
+case "$action" in
+  search)
+    if [[ -z "${1:-}" ]] || [[ "${1:-}" == "--help" ]]; then
+      show_help
+      exit 0
+    fi
+    search_decisions "$@"
+    ;;
+  list)
+    list_decisions
+    ;;
+  next-id)
+    cmd_next_id
+    ;;
+  get)
+    cmd_get "$@"
+    ;;
+  help|--help|-h)
+    show_help
+    ;;
+  *)
+    echo "Error: Unknown action '$action'" >&2
+    show_help
+    exit 1
+    ;;
+esac

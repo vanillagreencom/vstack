@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Launch parallel worktrees for a group of issues.
+#
+# Usage:
+#   parallel-launch <group_id> [--tmux | --ghostty]
+#   parallel-launch ISSUE-1 ISSUE-2 ... [--tmux | --ghostty]
+#
+# Environment:
+#   WORKTREE_CLI   - Path to worktree CLI tool (required)
+#   HARNESS_CMD    - Command template to start agent harness in worktree.
+#                    Use {issue} as placeholder for the issue ID.
+#                    Default: "claude -n {issue} --effort high --permission-mode bypassPermissions '/start {issue}'"
+#   ISSUE_PATTERN  - Regex pattern matching issue IDs (default: "[A-Z]+-[0-9]+")
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve project root, handling worktree paths
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+_git_common_dir=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null || echo "")
+if [[ "$_git_common_dir" != ".git" && -n "$_git_common_dir" ]]; then
+  PROJECT_ROOT="$(dirname "$_git_common_dir")"
+fi
+
+# Configurable issue pattern (default: JIRA-style ABC-123)
+ISSUE_PATTERN="${ISSUE_PATTERN:-[A-Z]+-[0-9]+}"
+
+TERMINAL_MODE=""
+ISSUES=()
+GROUP_ID=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --tmux) TERMINAL_MODE="tmux"; shift ;;
+    --ghostty) TERMINAL_MODE="ghostty"; shift ;;
+    --help|-h)
+      echo "Usage: parallel-launch <group_id> [--tmux | --ghostty]"
+      echo "       parallel-launch ISSUE-1 ISSUE-2 ... [--tmux | --ghostty]"
+      echo ""
+      echo "Options:"
+      echo "  --tmux      Open tmux windows (requires active tmux session)"
+      echo "  --ghostty   Open Ghostty terminals"
+      echo "  (default)   Auto-detect: tmux if \$TMUX set, else ghostty"
+      echo ""
+      echo "Environment:"
+      echo "  WORKTREE_CLI   Path to worktree CLI tool (required)"
+      echo "  HARNESS_CMD    Command template with {issue} placeholder"
+      echo "  ISSUE_PATTERN  Regex for issue IDs (default: [A-Z]+-[0-9]+)"
+      exit 0
+      ;;
+    [0-9]*) GROUP_ID="$1"; shift ;;
+    *)
+      # Match against configurable issue pattern
+      if echo "$1" | grep -qE "^${ISSUE_PATTERN}$"; then
+        ISSUES+=("$(echo "$1" | tr '[:lower:]' '[:upper:]')"); shift
+      else
+        echo "Error: unexpected argument: $1" >&2; exit 1
+      fi
+      ;;
+  esac
+done
+
+# Auto-detect terminal mode
+if [[ -z "$TERMINAL_MODE" ]]; then
+  if [[ -n "${TMUX:-}" ]]; then
+    TERMINAL_MODE="tmux"
+  else
+    TERMINAL_MODE="ghostty"
+  fi
+fi
+
+# Resolve issues from group_id if no explicit issues
+if [[ ${#ISSUES[@]} -eq 0 && -n "$GROUP_ID" ]]; then
+  GROUPS_JSON=$("$SCRIPT_DIR/parallel-groups" read 2>/dev/null || echo "[]")
+  GROUP_ISSUES=$(echo "$GROUPS_JSON" | jq -r --argjson gid "$GROUP_ID" '.[] | select(.group_id == $gid) | .issues[]' 2>/dev/null)
+  if [[ -z "$GROUP_ISSUES" ]]; then
+    echo "Error: no active group with id $GROUP_ID (may be stale)" >&2
+    exit 1
+  fi
+  while IFS= read -r issue; do
+    ISSUES+=("$issue")
+  done <<< "$GROUP_ISSUES"
+fi
+
+# Require worktree CLI
+if [[ -z "${WORKTREE_CLI:-}" ]]; then
+  echo "Error: WORKTREE_CLI not set. Set to path of worktree management tool." >&2
+  exit 1
+fi
+
+launch_start_command() {
+  local issue="$1"
+  if [[ -n "${HARNESS_CMD:-}" ]]; then
+    # Replace {issue} placeholder with actual issue ID
+    echo "${HARNESS_CMD//\{issue\}/$issue}"
+  else
+    # Default: Claude Code
+    printf "claude -n %s --effort high --permission-mode bypassPermissions '/start %s'" "$issue" "$issue"
+  fi
+}
+
+if [[ ${#ISSUES[@]} -lt 2 ]]; then
+  echo "Error: need at least 2 issues to launch in parallel" >&2
+  exit 1
+fi
+
+echo "Launching ${#ISSUES[@]} parallel worktrees (${TERMINAL_MODE})..."
+
+LAUNCHED=0
+FAILED=()
+
+for ISSUE in "${ISSUES[@]}"; do
+  echo "  Creating worktree for $ISSUE..."
+  if ! WT_PATH=$("$WORKTREE_CLI" create "$ISSUE" 2>&1); then
+    echo "  Failed: $WT_PATH" >&2
+    FAILED+=("$ISSUE")
+    continue
+  fi
+
+  START_CMD=$(launch_start_command "$ISSUE")
+
+  if [[ "$TERMINAL_MODE" == "tmux" ]]; then
+    "$SCRIPT_DIR/open-terminal" "$WT_PATH" --tmux "$ISSUE" --title "$ISSUE" --cmd "$START_CMD"
+  else
+    "$SCRIPT_DIR/open-terminal" "$WT_PATH" --title "$ISSUE" --cmd "$START_CMD"
+  fi
+  LAUNCHED=$((LAUNCHED + 1))
+done
+
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+  echo "Launched $LAUNCHED, failed ${#FAILED[@]}: ${FAILED[*]}" >&2
+  exit 1
+fi
+
+echo "Done — $LAUNCHED worktrees launched."

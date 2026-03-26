@@ -1,0 +1,78 @@
+---
+name: skill-name
+description: One-line trigger description. Be specific — agents use this to decide whether to load the skill. Include example trigger phrases.
+license: MIT
+user-invocable: true
+# dependencies:
+#   required: [skill-a, skill-b]
+#   optional: [skill-c]
+metadata:
+  author: vanillagreen
+  version: "1.0.0"
+---
+
+# Skill Title
+
+Brief description of what this skill covers, prioritized by impact.
+
+## When to Apply
+
+Reference these guidelines when:
+- Situation where this skill is relevant
+- Another trigger condition
+- Task type that benefits from this skill
+
+## Rule Categories by Priority
+
+| Priority | Category | Impact | Prefix |
+|----------|----------|--------|--------|
+| 1 | Category Name | CRITICAL | `prefix-` |
+| 2 | Category Name | HIGH | `prefix-` |
+
+## Quick Reference
+
+### 1. Category Name (CRITICAL)
+
+- `prefix-rule-name` - One-line description of the rule
+- `prefix-another-rule` - One-line description of the rule
+
+### 2. Category Name (HIGH)
+
+- `prefix-rule-name` - One-line description of the rule
+
+## How to Use
+
+Read individual rule files for detailed explanations and code examples:
+
+```
+rules/prefix-rule-name.md
+```
+
+Each rule file contains:
+- Brief explanation of why it matters
+- Incorrect code example with explanation
+- Correct code example with explanation
+
+## Resources
+
+Documentation lookup order: local skill files → ctx7 CLI → web fallback → ask user.
+
+### ctx7 CLI
+
+| Library | ctx7 ID | Use For |
+|---------|---------|---------|
+| Example | `/websites/example` | What to look up |
+
+### Web
+
+| Source | URL | Use For |
+|--------|-----|---------|
+| Official docs | `https://example.com/docs` | API reference |
+
+## Deep Reference
+
+| What Do You Need? | File |
+|--------------------|------|
+| Pattern description | [patterns/example-pattern.md](patterns/example-pattern.md) |
+| Reference description | [references/example-reference.md](references/example-reference.md) |
+| Workflow description | [workflows/example-workflow.md](workflows/example-workflow.md) |

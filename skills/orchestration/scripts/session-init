@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# session_init.sh - Detect environment info for orchestration workflows
+# Minimal portable version: platform, git branch, worktree status
+#
+# Usage: session_init.sh         # human-readable output
+#        session_init.sh --json  # JSON output for workflows
+#
+# Outputs detected info only. Project-specific checks (tool versions,
+# issue tracker auth, CI auth) belong at the project level, not here.
+set -euo pipefail
+
+OUTPUT_FORMAT="dashboard"
+[[ "${1:-}" == "--json" ]] && OUTPUT_FORMAT="json"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Platform detection
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+  PLATFORM="linux"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+  PLATFORM="macos"
+elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+  PLATFORM="windows"
+else
+  PLATFORM="unknown"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Git info
+# ─────────────────────────────────────────────────────────────────────────────
+BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+
+# Worktree detection
+IS_WORKTREE="false"
+WORKTREE_NAME=""
+MAIN_WORKTREE=""
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
+if [[ -n "$GIT_COMMON_DIR" && "$GIT_COMMON_DIR" != ".git" && "$GIT_COMMON_DIR" != "$(pwd)/.git" ]]; then
+  IS_WORKTREE="true"
+  WORKTREE_NAME=$(basename "$(pwd)")
+  MAIN_WORKTREE="$(dirname "$GIT_COMMON_DIR")"
+fi
+
+# Uncommitted changes count
+UNCOMMITTED=0
+if git rev-parse --git-dir &>/dev/null && ! git diff-index --quiet HEAD 2>/dev/null; then
+  UNCOMMITTED=$(git status --short 2>/dev/null | wc -l | tr -d ' ')
+fi
+
+# Active worktrees (other than current)
+WORKTREES="[]"
+if command -v git &>/dev/null; then
+  _cwd=$(pwd)
+  _wt_list=$(git worktree list --porcelain 2>/dev/null | grep "^worktree " | sed 's/^worktree //' | grep -v "^${_cwd}$" || true)
+  if [[ -n "$_wt_list" ]]; then
+    WORKTREES=$(echo "$_wt_list" | jq -R . | jq -s .)
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shell / terminal info
+# ─────────────────────────────────────────────────────────────────────────────
+IN_TMUX="false"
+[[ -n "${TMUX:-}" ]] && IN_TMUX="true"
+
+SHELL_NAME=$(basename "${SHELL:-unknown}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Output
+# ─────────────────────────────────────────────────────────────────────────────
+if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+  jq -n \
+    --arg platform "$PLATFORM" \
+    --arg branch "$BRANCH" \
+    --arg git_root "$GIT_ROOT" \
+    --argjson is_worktree "$IS_WORKTREE" \
+    --arg worktree_name "$WORKTREE_NAME" \
+    --arg main_worktree "$MAIN_WORKTREE" \
+    --argjson uncommitted "$UNCOMMITTED" \
+    --argjson worktrees "$WORKTREES" \
+    --argjson in_tmux "$IN_TMUX" \
+    --arg shell "$SHELL_NAME" \
+    '{
+      platform: $platform,
+      branch: $branch,
+      git_root: $git_root,
+      is_worktree: $is_worktree,
+      worktree_name: (if $is_worktree then $worktree_name else null end),
+      main_worktree: (if $is_worktree then $main_worktree else null end),
+      uncommitted: $uncommitted,
+      worktrees: $worktrees,
+      in_tmux: $in_tmux,
+      shell: $shell
+    }'
+else
+  echo "Environment"
+  echo "  Platform:    $PLATFORM"
+  echo "  Shell:       $SHELL_NAME"
+  echo "  Branch:      $BRANCH"
+  if [[ "$IS_WORKTREE" == "true" ]]; then
+    echo "  Worktree:    $WORKTREE_NAME (main: $MAIN_WORKTREE)"
+  fi
+  if [[ "$UNCOMMITTED" -gt 0 ]]; then
+    echo "  Uncommitted: $UNCOMMITTED files"
+  fi
+  if [[ "$IN_TMUX" == "true" ]]; then
+    echo "  Tmux:        active"
+  fi
+  _wt_count=$(echo "$WORKTREES" | jq 'length')
+  if [[ "$_wt_count" -gt 0 ]]; then
+    echo "  Worktrees:   $_wt_count active"
+    echo "$WORKTREES" | jq -r '.[] | "    " + .'
+  fi
+fi

@@ -1,0 +1,229 @@
+# Cycle Planning Workflow
+
+> **Dependencies**: `$ISSUE_CLI`, `scripts/workflow-sections`, project-management skill workflows
+
+Generate cycle plan via TPM agent with user approval.
+
+## 1. Generate Plan
+
+1. **Create agent tasks**:
+   ```bash
+   scripts/workflow-sections [project-management skill workflows]/tpm-cycle-plan.md --agent "tpm-cycle-plan" --emoji "🤹‍♂️"
+   ```
+   Create task for each.
+
+2. **Delegate to `[AGENT_TYPE]`**: Follow exactly, fill placeholders, add nothing else. Omit lines/sections with empty placeholders.
+
+   <delegation_format>
+   Task prefix: [TASK_PREFIX]
+
+   Workflow: [project-management skill workflows]/tpm-cycle-plan.md
+   </delegation_format>
+
+3. **After agent returns**: Collect JSON path. Agent returns `.JSON` file. If missing, halt.
+
+4. **Read file**: Use Read tool to get structured output.
+
+5. **Route by status** field from JSON output:
+
+| Status | Action |
+|--------|--------|
+| `project_complete` | → § 2 |
+| `plan_ready` | → § 3 |
+
+## 2. Project Completion
+
+JSON contains `completed_project`, `next_projects` (ordered by sort_order), `recommended`, and `actions.mark_complete`.
+
+### 2.1 Mark Project Complete
+
+**Execute mark_complete action**:
+
+```bash
+$ISSUE_CLI projects update [mark_complete.project_id] --state completed
+```
+
+### 2.2 Present Next Options
+
+1. **Present options**:
+   <output_format>
+
+   ### ✅ PROJECT COMPLETE — [completed_project.name]
+
+   ### 📋 NEXT PROJECT OPTIONS (by sort_order)
+
+   | # | Project | Pri | Ready | Blocked By |
+   |---|---------|-----|-------|------------|
+   | 1 | Phase 2: Features | P1 | ✅ | - |
+   | 2 | Phase 3: Backend Services | P2 | 🚫 | Phase 2: Features |
+   | 3 | Testing Infrastructure | P2 | ✅ | - |
+
+   Recommended: [recommended.name] — [recommended.reason]
+
+   Legend: ✅ yes  🚫 blocked
+   </output_format>
+
+2. **Ask user**: `Activate [recommended.name] (Recommended)` | `Activate [other options]` | `Skip`
+
+3. **Route based on selection**:
+
+   | Selection | Action |
+   |-----------|--------|
+   | Activate [NAME] | `$ISSUE_CLI projects update [PROJECT_ID] --state started` → § 1 |
+   | Skip | End workflow |
+
+   Only projects with `ready: true` should be activated. If user selects a blocked project, show blockers and ask to resolve first.
+
+## 3. Cycle Plan Approval
+
+JSON contains full plan with `velocity`, `planned_work`, `not_included`, `actions`.
+
+### 3.1 Check Velocity Adjustment
+
+**Skip if** `velocity.adjustment` is null.
+
+1. **Present adjustment**:
+   ```
+   Velocity adjustment proposed:
+   - Current: [CURRENT] pts/week
+   - Baseline: [BASELINE] pts/week
+   - Proposal: [adjustment.reason]
+   - New baseline: [adjustment.to] pts/week
+   ```
+
+2. **Ask user**: `Approve` | `Keep current` | `Custom value`
+
+### 3.2 Present Plan
+
+1. **Present plan**:
+   <output_format>
+
+   ### CYCLE PLAN — [cycle.name]
+
+   | Field | Value |
+   |-------|-------|
+   | Project | [project.name] ([project.progress]%) |
+   | Dates | [cycle.start] → [cycle.end] ([cycle.days_remaining] days) |
+   | Capacity | [capacity.available] pts available |
+
+   ### 📋 PLANNED WORK
+
+   | Pri | Issue | Title | Est | Agent | Rationale |
+   |-----|-------|-------|--------|-------|-----------|
+   | P1 | [ISSUE_ID] | Add order validation | 3 | [AGENT_TYPE] | L1 infra, unblocks [ISSUE_ID] |
+   | P2 | [ISSUE_ID] | Order panel view | 2 | [AGENT_TYPE] | L3 integration, blocked by above |
+   | P2 | [ISSUE_ID] | Ring buffer benchmarks | 2 | [AGENT_TYPE] | L4 testing, independent |
+
+   Pri = architecture-derived priority (P1 first, P2 second, etc.)
+
+   ### 🔗 MISSING RELATIONS (if any)
+
+   | From | → | To | Reason |
+   |------|---|-----|--------|
+   | [ISSUE_ID] | blocks | [ISSUE_ID] | Creates validation consumed by downstream |
+
+   ### ⏭️ NOT INCLUDED
+
+   | Issue | Title | Reason |
+   |-------|-------|--------|
+   | [ISSUE_ID] | Chart optimization | Blocked by [ISSUE_ID] (not in) |
+   | [ISSUE_ID] | Full integration tests | Over capacity |
+
+   ### 📊 HEALTH
+
+   | Blocked | Stale | Velocity |
+   |---------|-------|----------|
+   | 1 ⚠️ | 0 ✅ | 12 pts/wk ✅ |
+
+   Legend: ✅ healthy  ⚠️ attention needed  🔴 critical
+   </output_format>
+
+2. **Ask user**: `Approve plan` | `Modify` | `Cancel`
+
+3. **Route based on selection**:
+
+   | Selection | Action |
+   |-----------|--------|
+   | Approve | → § 4 |
+   | Modify | User specifies changes via free text, adjust `actions` object, re-present plan |
+   | Cancel | End workflow |
+
+## 4. Execute Actions
+
+### 4.1 Create Cycle (if actions.create_cycle exists)
+
+**Skip if** `actions.create_cycle` is null.
+
+1. **Create cycle**:
+   ```bash
+   $ISSUE_CLI cycles create --team [create_cycle.team] --start [create_cycle.start] --end [create_cycle.end]
+   ```
+
+2. **Store created cycle ID** for assignment.
+
+### 4.2 Execute Plan Actions
+
+1. **Execute** from `actions` object per workflow-actions patterns. Order: blocking relations first, then priorities, then cycle assignment (state change), then sort order LAST (sortOrder is per-state-column -- setting before state change gets overwritten).
+
+   | Action | Read | Data |
+   |--------|------|------|
+   | Set priorities | § Priority Updates | `actions.set_priorities[]` |
+   | Assign to cycle | § Cycle Assignment | `actions.assign_to_cycle[]` (issue IDs) |
+   | Set sort order | `$ISSUE_CLI issues update [ID] --sort-order [VALUE]` | `actions.set_sort_order[]` (parent/standalone only, AFTER cycle assignment) |
+   | Set estimates | § Estimate & Label Updates | `actions.set_estimates[]` |
+   | Set agent labels | § Estimate & Label Updates | `actions.set_labels[]` |
+   | Update initiative | § Initiative & Project Status | `actions.update_initiative` |
+   | Update project | § Initiative & Project Status | `actions.update_project` |
+
+2. **Sync bundle states** per workflow-actions § Parent State Sync:
+   - Assigned parent (has children): assign all pending children to the same cycle and state.
+   - Assigned child (has `parent_id`): if parent is Backlog → update parent to Todo and assign same cycle.
+
+### 4.3 Set Missing Blocking Relations
+
+If `actions.add_relations[]` exists (from TPM architecture analysis):
+
+For each relation:
+```bash
+$ISSUE_CLI issues add-relation [FROM_ID] --blocks [TO_ID]
+```
+
+TPM populates this when § 1.4 architecture ordering reveals dependencies not yet recorded in issue tracker (e.g., one domain issue should block another domain issue in same project, but no relation exists).
+
+**Note**: Skip comments for priority updates -- rationale already shown in plan presentation.
+
+## 5. Present Results
+
+<output_format>
+
+### ✅ CYCLE PLAN APPLIED
+
+| Action | Count |
+|--------|-------|
+| Relations added | N |
+| Priorities set | N |
+| Sort order set | N |
+| Assigned to cycle | N |
+| Estimates set | N |
+| Labels set | N |
+</output_format>
+
+## 5.5. Auto-Detect Parallel Groups
+
+**Skip if** fewer than 2 issues were assigned to cycle.
+
+1. **Collect unblocked issue IDs**: From `actions.assign_to_cycle[]`, filter to issues that have NO `blocked_by` relations with other issues in the planned set.
+
+2. **If 2+ unblocked**: Run `/parallel-check [UNBLOCKED_ISSUE_IDS]` via Skill. Persistence happens automatically via § 11 of parallel-check workflow.
+
+3. **Present any safe groups found**: Include in results output so user knows parallel launch is available from next `/start`.
+
+## 6. Return State
+
+**If managed** (`lifecycle: "managed"`):
+   1. **Get task** on last task → description shows return section.
+   2. **Continue there immediately**, do not stop.
+
+**If standalone** (`lifecycle: "self"`):
+
+**END** — cycle plan complete.

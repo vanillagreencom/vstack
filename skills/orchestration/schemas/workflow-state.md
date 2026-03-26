@@ -1,0 +1,93 @@
+# Workflow State Schema
+
+Persistent state file for orchestration workflows. Initialized during session start and designed to survive context compaction.
+
+**Location**: `$ORCH_STATE_DIR/workflow-state-[ISSUE_ID].json` (default: `tmp/`)
+
+## Schema
+
+```json
+{
+  "issue_id": "PROJ-123",
+  "sub_issues": ["PROJ-124", "PROJ-125"],
+  "agent": "backend",
+  "worktree": "/absolute/path/to/worktree",
+  "branch": "user/proj-123",
+  "team_name": "proj-123",
+  "qa_labels": ["needs-perf-test", "needs-safety-audit"],
+  "child_sessions": {
+    "backend": { "status": "active", "agent_id": "agent_abc123", "spawned_at": "2026-03-19T10:00:00Z" },
+    "frontend": { "status": "closed", "agent_id": "agent_def456", "spawned_at": "2026-03-19T09:00:00Z" }
+  },
+  "review_agents": ["security-review", "test-review", "doc-review"],
+  "pre_delegate_sha": "abc123f",
+  "skip_qa": false,
+  "cycles": 0,
+  "json_paths": [
+    "tmp/review-security-20260128-100000.json"
+  ],
+  "fixed_items": [
+    {
+      "description": "Null pointer dereference in empty buffer",
+      "location": "src/lib.rs:42",
+      "commit": "abc123f",
+      "source": "pr-review"
+    }
+  ],
+  "escalated_items": [
+    {
+      "description": "Auth token refresh not implemented",
+      "location": "src/auth/mod.rs",
+      "reason": "Requires API design decision",
+      "source": "qa-review"
+    }
+  ],
+  "audit_issues_created": ["PROJ-200", "PROJ-201"],
+  "pr_review_baseline": {
+    "last_ts": "2026-01-28T10:00:00Z",
+    "last_threads": 2
+  },
+  "pr_comment_review": {
+    "iterations": 0,
+    "fixes": [],
+    "issues_created": [],
+    "skipped": []
+  }
+}
+```
+
+## Field Definitions
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `issue_id` | string | Parent issue identifier |
+| `sub_issues` | string[] | Child issue IDs if bundled |
+| `agent` | string | Primary dev agent type |
+| `worktree` | string | Absolute path to git worktree |
+| `branch` | string | Git branch name |
+| `team_name` | string | Agent team name (optional, for recovery) |
+| `qa_labels` | string[] | QA trigger labels from dev return |
+| `child_sessions` | object | Per-agent lifecycle: `{agent: {status, agent_id, spawned_at}}` |
+| `review_agents` | string[] | Currently alive review agent names |
+| `review_agent_ids` | object | Agent IDs for resume `{"name":"id",...}` |
+| `pre_delegate_sha` | string | HEAD before delegation — scopes re-review diffs |
+| `skip_qa` | boolean | Skip QA for re-cycle (cleared after routing) |
+| `cycles` | number | Review/fix cycle count |
+| `json_paths` | string[] | Accumulated review JSON file paths |
+| `fixed_items` | object[] | Blockers successfully fixed |
+| `escalated_items` | object[] | Blockers that couldn't be fixed |
+| `audit_issues_created` | string[] | Issue IDs created by audit |
+| `pr_review_baseline` | object | Baseline for PR comment loop detection |
+| `pr_comment_review` | object | PR comment review tracking |
+
+## CLI
+
+All operations use `scripts/workflow-state`. Run `scripts/workflow-state help` for full usage.
+
+```bash
+scripts/workflow-state init PROJ-123 --agent backend --worktree /tmp/wt
+scripts/workflow-state get PROJ-123 .cycles
+scripts/workflow-state increment PROJ-123 cycles
+scripts/workflow-state append PROJ-123 json_paths "review.json"
+scripts/workflow-state set PROJ-123 pr_review_baseline '{"last_ts":"2026-01-28","last_threads":2}'
+```

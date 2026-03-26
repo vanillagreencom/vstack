@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Extract section headers from workflow markdown files
+# Outputs JSON array suitable for task creation
+#
+# Markers:
+#   ⤵  = Sub-workflow (orchestrator executes via harness workflow mechanism)
+#   🐲/🤹‍♂️/🐞/🪲 = Agent delegation (orchestrator delegates to agent)
+#
+# Usage:
+#   workflow-sections <file>                                        # Top-level workflow
+#   workflow-sections <file> --subflow "/cmd"                       # Sub-workflow (⤵ marker)
+#   workflow-sections <file> --agent "dev-fix" --emoji "🐲"         # Agent with dev emoji
+#   workflow-sections <file> --subflow "/cmd" --return "§ 5"        # Sub-workflow with return point
+#   workflow-sections <file> --parent 4                             # Child tasks of task #4
+
+set -euo pipefail
+
+show_help() {
+    cat << 'EOF'
+Extract section headers from workflow markdown files for task creation.
+
+Usage: workflow-sections <file> [options]
+
+Options:
+  --subflow "/cmd"    Sub-workflow marker (⤵) - orchestrator executes via workflow mechanism
+  --agent "name"      Agent delegation marker - orchestrator delegates to agent
+  --emoji "X"         Custom emoji for agent marker (default: 🤖). Types: 🐲 dev, 🤹‍♂️ tpm, 🐞 review, 🪲 QA
+  --return "§ N"      Return point after completion
+  --parent <taskId>   Parent task ID for nesting
+  --help              Show this help
+
+Examples:
+  workflow-sections workflow.md                                    # Top-level (no marker)
+  workflow-sections workflow.md --subflow "/ci-fix"                # → ⤵ /ci-fix § N
+  workflow-sections workflow.md --agent "dev-fix" --emoji "🐲"     # → 🐲 dev-fix § N
+EOF
+    exit 0
+}
+
+FILE="${1:-}"
+SUBFLOW=""
+PARENT_ID=""
+RETURN_TO=""
+AGENT_MODE=""
+EMOJI=""
+
+if [[ -z "$FILE" || "$FILE" == "--help" || "$FILE" == "-h" ]]; then
+    show_help
+fi
+
+shift
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --subflow)
+            SUBFLOW="$2"
+            shift 2
+            ;;
+        --agent)
+            AGENT_MODE="$2"
+            shift 2
+            ;;
+        --emoji)
+            EMOJI="$2"
+            shift 2
+            ;;
+        --parent)
+            PARENT_ID="$2"
+            shift 2
+            ;;
+        --return)
+            RETURN_TO="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! -f "$FILE" ]]; then
+    echo "File not found: $FILE" >&2
+    exit 1
+fi
+
+# Compute indent and task prefix (same for all tasks in this run)
+if [[ -n "$AGENT_MODE" || -n "$PARENT_ID" ]]; then
+    indent="⏤⏤"
+elif [[ -n "$SUBFLOW" ]]; then
+    indent="⏤"
+else
+    indent=""
+fi
+
+if [[ -n "$AGENT_MODE" ]]; then
+    TASK_PREFIX="${indent}${EMOJI:-🤖} $AGENT_MODE"
+elif [[ -n "$SUBFLOW" ]]; then
+    TASK_PREFIX="${indent}⤵ $SUBFLOW"
+else
+    TASK_PREFIX=""
+fi
+
+# Extract "## N. Title" headers and build JSON array using jq for safe output
+# Fields: subject (brief title), description (detailed), activeForm (present continuous), taskPrefix
+RESULT="[]"
+
+while IFS= read -r line; do
+    # Extract number and title
+    num=$(echo "$line" | sed -E 's/^## ([0-9]+)\..*/\1/')
+    title=$(echo "$line" | sed -E 's/^## [0-9]+\. //')
+
+    # Build subject from pre-computed prefix
+    if [[ -n "$TASK_PREFIX" ]]; then
+        subject="$TASK_PREFIX § $num: $title"
+    else
+        subject="§ $num: $title"
+    fi
+
+    # Description references the workflow file, section, and return point
+    if [[ -n "$RETURN_TO" ]]; then
+        description="Execute section $num from $FILE. Return to $RETURN_TO"
+    else
+        description="Execute section $num from $FILE"
+    fi
+
+    # Build JSON object safely with jq --arg
+    OBJ=$(jq -n \
+        --arg subject "$subject" \
+        --arg description "$description" \
+        --arg activeForm "$title" \
+        '{subject: $subject, description: $description, activeForm: $activeForm}')
+
+    # Add taskPrefix if set
+    if [[ -n "$TASK_PREFIX" ]]; then
+        OBJ=$(echo "$OBJ" | jq --arg tp "$TASK_PREFIX" '. + {taskPrefix: $tp}')
+    fi
+
+    # Add metadata if needed
+    if [[ -n "$PARENT_ID" ]] || [[ -n "$RETURN_TO" ]]; then
+        META="{}"
+        [[ -n "$PARENT_ID" ]] && META=$(echo "$META" | jq --arg p "$PARENT_ID" '. + {parentId: $p}')
+        [[ -n "$RETURN_TO" ]] && META=$(echo "$META" | jq --arg r "$RETURN_TO" '. + {returnTo: $r}')
+        OBJ=$(echo "$OBJ" | jq --argjson m "$META" '. + {metadata: $m}')
+    fi
+
+    RESULT=$(echo "$RESULT" | jq --argjson obj "$OBJ" '. + [$obj]')
+done < <(grep -E '^## [0-9]+\.' "$FILE" || true)
+
+echo "$RESULT" | jq '.'
