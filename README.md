@@ -36,7 +36,7 @@ This makes `vstack` closer to a package manager than a static dotfiles repo.
 - Package source switching: install from this repo or another compatible repo.
 - Global and project scope: install once per user, or per project.
 - Skill dependency resolution: skills can declare required and optional dependencies in `SKILL.md`; required dependencies are auto-included transitively during install.
-- Config-driven attribution: `vstack.toml` maps extra skills to agents, role-wide skills to agent roles, and hook events to the roles that should receive them.
+- Config-driven attribution: `vstack.toml` maps extra skills to agents, role-wide skills to agent roles, and hook events to the roles that should receive them. Basically, map a skill to an agent in the TOML, that skill as added to the Agents .md specific to how it works in each harness.
 - Reconciliation: installed agents regenerate when skills/hooks change.
 - Source registry: previously used package repos are remembered and reusable from the TUI.
 - Safe defaults: project-only harnesses are blocked or skipped appropriately in global mode.
