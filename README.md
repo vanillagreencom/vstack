@@ -40,6 +40,7 @@ This makes `vstack` closer to a package manager than a static dotfiles repo.
 - Reconciliation: installed agents regenerate when skills/hooks change.
 - Source registry: previously used package repos are remembered and reusable from the TUI.
 - Safe defaults: project-only harnesses are blocked or skipped appropriately in global mode.
+- Update system built in. Update a skill in a repo, users get notified in the app and can easily update.
 - Fast terminal UX: native Rust app built with `ratatui` and `crossterm`.
 
 ## Quick Start
