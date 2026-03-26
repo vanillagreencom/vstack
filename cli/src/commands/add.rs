@@ -18,12 +18,7 @@ struct ResolvedSource {
 
 fn source_label(source: &str) -> String {
     if Path::new(source).exists() {
-        let path = Path::new(source);
-        return path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(source)
-            .to_string();
+        return format!("local: {source}");
     }
 
     let trimmed = source
