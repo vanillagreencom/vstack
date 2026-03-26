@@ -217,6 +217,14 @@ case "${1:-}" in
     [[ -n "${BOT_REMOTE_NAME:-}" && -n "${BOT_REMOTE_URL:-}" ]] && \
       git -C "$WT_PATH" remote add "$BOT_REMOTE_NAME" "$BOT_REMOTE_URL" 2>/dev/null || true
 
+    # Install dependencies if npm project detected.
+    if [[ -f "$WT_PATH/package.json" ]] && command -v npm >/dev/null 2>&1; then
+      (
+        cd "$WT_PATH" || exit 0
+        npm install --no-audit --no-fund >/dev/null 2>&1
+      ) &
+    fi
+
     # Set agent git identity (if configured, requires extensions.worktreeConfig=true)
     if [[ -n "${BOT_NAME:-}" ]]; then
       git -C "$WT_PATH" config --worktree user.name "$BOT_NAME"
