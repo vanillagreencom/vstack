@@ -1,6 +1,6 @@
 # Iced 0.14 Patterns
 
-Patterns and rules for building high-performance UIs with Iced 0.14's reactive Elm Architecture.
+Patterns and rules for building Iced 0.14 applications with Elm-style state management.
 
 ## Structure
 
@@ -15,7 +15,7 @@ Patterns and rules for building high-performance UIs with Iced 0.14's reactive E
 
 1. Copy `rules/_template.md` to `rules/prefix-description.md`
 2. Choose the appropriate area prefix:
-   - `hr-` for Hard Rules (Section 1)
+   - `hr-` for Framework Constraints (Section 1; broad Iced behavior only)
    - `dev-` for Development Practices (Section 2)
    - `cache-` for Cache & Multi-Window (Section 3)
    - `elm-` for Elm Architecture (Section 4)
@@ -63,6 +63,6 @@ Brief explanation of the rule and why it matters.
 
 ## Impact Levels
 
-- `CRITICAL` - Non-negotiable framework constraints; violations cause silent breakage
+- `CRITICAL` - Broad Iced framework constraints; violations cause incorrect behavior or broken interaction
 - `HIGH` - Significant correctness or performance impact
 - `MEDIUM` - Good practices; violations cause coupling or maintenance burden

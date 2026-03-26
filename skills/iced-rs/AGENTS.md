@@ -24,21 +24,17 @@ App > Window > Shell > Zone > TitleBar > Panel > Canvas > Overlay
 
 ## Abstract
 
-Patterns and rules for building high-performance UIs with Iced 0.14's reactive Elm Architecture, prioritized by impact from critical (framework hard rules) to incremental (interaction gotchas). Each rule includes detailed explanations and, where applicable, incorrect vs. correct code examples.
+Patterns and rules for building Iced 0.14 applications with Elm-style state management, prioritized by impact from core framework constraints to interaction gotchas. Each rule includes detailed explanations and, where applicable, incorrect vs. correct code examples.
 
 ---
 
 ## Table of Contents
 
-1. [Hard Rules](#1-hard-rules) — **CRITICAL**
+1. [Framework Constraints](#1-framework-constraints) — **CRITICAL**
    - 1.1 [Widget Tree Consistency](#11-widget-tree-consistency)
-   - 1.2 [Pick Area Geometry](#12-pick-area-geometry)
+   - 1.2 [View Is Pure](#12-view-is-pure)
    - 1.3 [Scroll State Initialization](#13-scroll-state-initialization)
-   - 1.4 [Overlay State Isolation](#14-overlay-state-isolation)
-   - 1.5 [Single Message Per Interaction](#15-single-message-per-interaction)
-   - 1.6 [View Is Pure](#16-view-is-pure)
-   - 1.7 [Minimum Pane Size](#17-minimum-pane-size)
-   - 1.8 [Title Bar Event Ordering](#18-title-bar-event-ordering)
+   - 1.4 [Minimum Pane Size](#14-minimum-pane-size)
 2. [Development Practices](#2-development-practices) — **HIGH**
    - 2.1 [Validate API Before Use](#21-validate-api-before-use)
    - 2.2 [Reactive Discipline](#22-reactive-discipline)
@@ -63,11 +59,11 @@ Patterns and rules for building high-performance UIs with Iced 0.14's reactive E
 
 ---
 
-## 1. Hard Rules
+## 1. Framework Constraints
 
 **Impact: CRITICAL**
 
-Non-negotiable constraints from Iced 0.14 framework behavior. Violations cause silent breakage — widgets stop responding, events misroute, or state corrupts without errors.
+Constraints from Iced 0.14 behavior and Elm-style architecture. Keep this section limited to broadly applicable framework guidance, not app-specific pane-grid or overlay workflows.
 
 ### 1.1 Widget Tree Consistency
 
@@ -92,63 +88,23 @@ mouse_area(label)
     .on_press_maybe(if enable { Some(msg) } else { None })
 ```
 
-### 1.2 Pick Area Geometry
-
-**Impact: CRITICAL (pane drag completely disabled)**
-
-TitleBar content must use `Shrink` width so empty space remains for the pick area. `Fill` width on tab row content eliminates the pick area, disabling pane drag entirely.
-
-**Incorrect (Fill width consumes pick area):**
-
-```rust
-pane_grid::TitleBar::new(
-    row![tabs].width(Length::Fill)  // No pick area left
-)
-```
-
-**Correct (Shrink width preserves pick area):**
-
-```rust
-pane_grid::TitleBar::new(
-    row![tabs].width(Length::Shrink)  // Pick area in remaining space
-)
-```
-
-### 1.3 Scroll State Initialization
-
-**Impact: CRITICAL (initial dimensions never captured)**
-
-`scrollable.on_scroll` fires only on user-initiated scroll events, never on initial layout. Use `sensor.on_show` to capture initial dimensions, then combine with `on_scroll` for ongoing tracking.
-
-### 1.4 Overlay State Isolation
-
-**Impact: CRITICAL (base layer widgets break when overlays change)**
-
-Overlay layers (stack children beyond the base) must not affect the base layer's widget structure. Add/remove overlay layers freely, but never change how base-layer widgets are constructed based on overlay presence.
-
-### 1.5 Single Message Per Interaction
-
-**Impact: CRITICAL (race conditions and unpredictable state)**
-
-Each widget interaction produces exactly one message. For composite actions (e.g., tab press that might become a drag), use state machines in `update()` rather than emitting multiple messages from `view()`.
-
-### 1.6 View Is Pure
+### 1.2 View Is Pure
 
 **Impact: CRITICAL (hidden state corruption and non-deterministic rendering)**
 
 `view()` must be a pure function of `State`. No side effects, no memoization that depends on call frequency, no hidden state. All mutable state lives in `State` and changes only in `update()`.
 
-### 1.7 Minimum Pane Size
+### 1.3 Scroll State Initialization
+
+**Impact: CRITICAL (initial dimensions never captured)**
+
+`scrollable.on_scroll` fires only after scrolling, not during initial layout. Capture initial dimensions with an explicit measurement step such as `sensor.on_resize`, then combine that with `on_scroll` if you also need ongoing scroll updates.
+
+### 1.4 Minimum Pane Size
 
 **Impact: CRITICAL (panes collapse or ignore per-pane minimums)**
 
-`PaneGrid::min_size` sets a uniform minimum for ALL panes. For per-pane minimums, wrap panel content in `container` with `min_width`/`min_height` and clamp resize ratios (0.15-0.85).
-
-### 1.8 Title Bar Event Ordering
-
-**Impact: CRITICAL (state cleared by body handler overwrites title bar state)**
-
-In `pane_grid::Content::update`, the title bar is processed before the body. When the cursor crosses from body to title bar in a single frame, title bar messages (e.g., `TabBarEntered`) fire before body messages (e.g., `PaneBodyExited`). Do not unconditionally clear state in body-exit handlers that the title bar just established.
+`PaneGrid::min_size` sets a uniform minimum for all panes. If different panes need different minimums, enforce them in the pane content or in your split/resize state instead of assuming `PaneGrid` tracks them per pane.
 
 ---
 

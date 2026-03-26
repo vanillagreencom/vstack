@@ -9,4 +9,4 @@ tags: scrollable, sensor, on_scroll, on_show
 
 **Impact: CRITICAL (initial dimensions never captured)**
 
-`scrollable.on_scroll` fires only on user-initiated scroll events, never on initial layout. Use `sensor.on_show` to capture initial dimensions, then combine with `on_scroll` for ongoing tracking.
+`scrollable.on_scroll` fires only after scrolling, not during initial layout. Capture initial dimensions with an explicit measurement step such as `sensor.on_resize`, then combine that with `on_scroll` if you also need ongoing scroll updates.

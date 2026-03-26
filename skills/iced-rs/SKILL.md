@@ -1,6 +1,6 @@
 ---
 name: iced-rs
-description: Iced 0.14 UI patterns, hard rules, and development practices for high-performance reactive applications. Use when implementing Iced views, widgets, charts, pane_grid layouts, or working with the Elm Architecture.
+description: Iced 0.14 UI patterns, framework constraints, and development practices for reactive applications. Use when implementing Iced views, widgets, layouts, pane_grid, Canvas, or subscriptions.
 license: MIT
 user-invocable: true
 metadata:
@@ -10,7 +10,7 @@ metadata:
 
 # Iced 0.14 Patterns
 
-Patterns and rules for building high-performance UIs with Iced 0.14's reactive Elm Architecture, prioritized by impact.
+Patterns for building Iced 0.14 applications with Elm-style state management, prioritized by impact.
 
 ## When to Apply
 
@@ -36,7 +36,7 @@ App > Window > Shell > Zone > TitleBar > Panel > Canvas > Overlay
 
 | Priority | Category | Impact | Prefix |
 |----------|----------|--------|--------|
-| 1 | Hard Rules | CRITICAL | `hr-` |
+| 1 | Framework Constraints | CRITICAL | `hr-` |
 | 2 | Development Practices | HIGH | `dev-` |
 | 3 | Cache & Multi-Window | HIGH | `cache-` |
 | 4 | Elm Architecture | MEDIUM | `elm-` |
@@ -44,16 +44,12 @@ App > Window > Shell > Zone > TitleBar > Panel > Canvas > Overlay
 
 ## Quick Reference
 
-### 1. Hard Rules (CRITICAL)
+### 1. Framework Constraints (CRITICAL)
 
-- `hr-widget-tree-consistency` - Never conditionally wrap widgets; always wrap, conditionally enable
-- `hr-pick-area-geometry` - TitleBar content must use Shrink width to preserve pick area
-- `hr-scroll-state` - Use sensor.on_show for initial dimensions, not scrollable.on_scroll
-- `hr-overlay-state-isolation` - Overlay layers must not affect base layer widget structure
-- `hr-single-message` - One message per interaction; use state machines for composites
-- `hr-view-is-pure` - view() is pure function of State; no side effects or hidden state
-- `hr-minimum-pane-size` - PaneGrid::min_size is uniform; use container for per-pane minimums
-- `hr-titlebar-event-ordering` - Title bar events fire before body events in same frame
+- `hr-widget-tree-consistency` - Keep widget structure stable across interaction states; toggle behavior, not wrappers
+- `hr-view-is-pure` - Keep `view()` a pure projection of state; mutate only in `update()`
+- `hr-scroll-state` - `scrollable` events do not report initial layout; capture initial size explicitly before relying on scroll updates
+- `hr-minimum-pane-size` - `PaneGrid::min_size` is shared across panes; handle per-pane minimums in pane content/layout
 
 ### 2. Development Practices (HIGH)
 
@@ -94,6 +90,8 @@ Each rule file contains:
 - Incorrect code example with explanation
 - Correct code example with explanation
 
+The `hr-` prefix is historical. Reserve it for broad Iced constraints, not app-specific pane-grid or overlay workflows.
+
 ## Resources
 
 Documentation lookup order: local skill files → ctx7 CLI → web fallback.
@@ -102,7 +100,7 @@ Documentation lookup order: local skill files → ctx7 CLI → web fallback.
 
 | Library | ctx7 ID | Use For |
 |---------|---------|---------|
-| Iced 0.14 | `/websites/rs_iced_0_14_0` | Widgets, Theme, Canvas, Shader, Subscription, pane_grid |
+| Iced 0.14 | `/websites/rs_iced_iced` | Widgets, Theme, Canvas, Shader, Subscription, pane_grid |
 | tokio | `/websites/rs_tokio` | Async runtime, channels, streams |
 | wgpu | `/websites/rs_wgpu` | GPU rendering, shader pipelines |
 

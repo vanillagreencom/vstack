@@ -5,10 +5,10 @@ The section ID (in parentheses) is the filename prefix used to group rules.
 
 ---
 
-## 1. Hard Rules (hr)
+## 1. Framework Constraints (hr)
 
 **Impact:** CRITICAL
-**Description:** Non-negotiable constraints from Iced 0.14 framework behavior. Violations cause silent breakage — widgets stop responding, events misroute, or state corrupts without errors.
+**Description:** Constraints from Iced 0.14 behavior and Elm-style architecture. Keep this section limited to broadly applicable framework guidance, not app-specific pane-grid or overlay workflows.
 
 ## 2. Development Practices (dev)
 
