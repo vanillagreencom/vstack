@@ -261,7 +261,7 @@ Project-level configuration:
 
 - `life-dev-agent-persistence` - Dev agents persist entire session; re-delegate for fix cycles
 - `life-review-agent-lifecycle` - Review agents persist across fix/re-review; QA agents are one-shot
-- `life-wait-for-return` - Never intervene while tasks in-progress; idle notifications are normal
+- `life-wait-for-return` - Never intervene while tasks in-progress; quiet ≠ stalled; confirm stall via session-level evidence before shutdown
 - `life-never-fix-as-orchestrator` - Always delegate to domain agent; never fix code directly
 
 ### 4. State Management (HIGH)

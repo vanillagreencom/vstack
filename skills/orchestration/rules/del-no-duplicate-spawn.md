@@ -11,4 +11,4 @@ tags: delegation, spawn, lifecycle
 
 Never spawn a fresh agent when an existing one of the same type is alive — message it instead. Before creating agent tasks, check the task list for PENDING tasks with the same prefix. Completed tasks from prior rounds are not duplicates.
 
-If an agent appears stuck (no progress across multiple idle cycles): shut down → respawn → re-create tasks → re-delegate. Never fix code yourself as the orchestrator.
+If an agent appears stuck: confirm the stall using session-level evidence per `life-wait-for-return` (quiet ≠ stalled — check activity signals, not just worktree state). Only after stall confirmed: shut down → respawn → re-create tasks → re-delegate. Never fix code yourself as the orchestrator.
