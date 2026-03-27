@@ -37,8 +37,10 @@ ShadCN/ui demonstrates excellent component design principles: consistent tokens,
 | Generous padding (px-4 py-2) | Minimal padding (px-2 py-1 or less) |
 | Comfortable line-height | Tight line-height (1.2-1.3) |
 | Standard 14-16px body text | 11-13px data text |
-| Card-based layouts with gaps | Edge-to-edge panels with minimal gaps |
-| Rounded corners (radius-md) | Minimal or no rounding (0-2px) |
+| Card-based layouts with gaps | Edge-to-edge panels with 1px hairline gaps |
+| Rounded corners (radius-md) | Zero radius. Sharp corners on everything — cards, buttons, inputs, modals, badges, dropdowns. No exceptions. |
+| Soft shadows for elevation | No shadows. Elevation through brightness increments and 1px borders only. |
+| Sans-serif for all text | Monospace for headings, labels, buttons, data. Sans only for prose paragraphs. |
 | Prominent hover states | Subtle hover (opacity shift, not color change) |
 
 The principle is the same (consistent, composable, token-driven) but the spatial budget is dramatically smaller.

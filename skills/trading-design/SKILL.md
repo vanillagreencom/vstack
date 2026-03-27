@@ -1,6 +1,6 @@
 ---
 name: trading-design
-description: Professional trading UI design principles — density, color theory, panel architecture, data display conventions, and component philosophy. Stack-agnostic guide for building interfaces that prioritize signal through noise. Use when designing, implementing, or reviewing trading UI.
+description: Professional trading UI design principles — monospace-forward typography, zero-radius sharp corners, grid-based layouts, density, two-hue color, panel architecture, data display conventions. Stack-agnostic guide for building interfaces that prioritize signal through noise. Use when designing, implementing, or reviewing trading UI.
 license: MIT
 user-invocable: true
 metadata:
@@ -10,7 +10,7 @@ metadata:
 
 # Professional Trading UI Design
 
-Stack-agnostic design principles for professional trading applications. Sierra Chart density + Vercel dark refinement + ShadCN component clarity. Dark-primary canvas, two-hue directional color, opacity-driven depth. Every pixel earns its place.
+Stack-agnostic design principles for professional trading applications. Sierra Chart density + Bloomberg grid structure + Vercel dark refinement. Monospace-forward typography, zero-radius sharp corners, left-aligned grid layouts, 1px hairline separators, two-hue directional color, opacity-driven depth. Every pixel earns its place.
 
 ## When to Apply
 
@@ -39,7 +39,7 @@ Reference these guidelines when:
 
 ### 1. Design Philosophy (CRITICAL)
 
-- `phil-identity` — Target aesthetic (Sierra Chart + Vercel + ShadCN), reference platforms, anti-patterns to avoid
+- `phil-identity` — Target aesthetic (Sierra Chart + Vercel + ShadCN), defining characteristics (mono-forward, zero-radius, left-aligned, grid structure), reference platforms, anti-patterns
 - `phil-density-first` — Density as primary constraint, pixel accountability, benchmarks, information hierarchy through density
 - `phil-signal-noise` — Signal-through-noise ratio, noise budgets, earned pixels, animation philosophy
 
@@ -48,11 +48,11 @@ Reference these guidelines when:
 - `vis-two-hue-system` — Two chromatic hues for direction only; all other variation from neutral at graduated opacities
 - `vis-opacity-depth` — Opacity as the primary visual variable; one hue many roles; consistency rule
 - `vis-near-black-foundation` — Dark-primary canvas philosophy; data prominence; surface layering; theming beyond dark
-- `vis-surface-elevation` — 5-level elevation ladder; no shadows or gradients; elevation in context
+- `vis-surface-elevation` — 5-level elevation ladder; no shadows, gradients, or rounded corners; 1px-gap grid pattern; elevation in context
 
 ### 3. Typography & Density (CRITICAL)
 
-- `type-dual-font` — Sans for chrome, monospace for all data; tabular/lining figures; the sans/mono boundary
+- `type-dual-font` — Monospace as dominant voice (headings, labels, buttons, data); sans for prose only; tabular/lining figures; the mono/sans boundary
 - `type-alignment-hierarchy` — Decimal alignment, size hierarchy, column layout principles
 - `type-semantic-tokens` — Token architecture, naming conventions, enforcement as code quality practice
 

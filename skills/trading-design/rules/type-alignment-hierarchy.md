@@ -41,3 +41,15 @@ The difference between levels should be small (1-2px) because the base is alread
 - **Left-align text data** — symbols, names, labels.
 - **Fixed column widths** — columns should not resize when data changes. A price going from 99.50 to 100.50 should not cause adjacent columns to shift. Design for the maximum expected width.
 - **Header alignment matches data** — if the column data is right-aligned, the header is right-aligned.
+
+### Default Alignment: Left
+
+Outside of numeric data columns, the default alignment for all content is left. This applies to:
+
+- **Headings and titles** — left-aligned, never centered. Centered headlines are a consumer/marketing convention. Left alignment signals authority and reads as data-serious.
+- **Body text and descriptions** — left-aligned with a strong left edge.
+- **CTAs and action groups** — left-aligned, stacked or in a row from the left.
+- **Metric displays and stat blocks** — left-aligned labels above left-aligned values.
+- **Section headings and labels** — left-aligned, uppercase, tracked.
+
+Centered text is acceptable only in constrained contexts: modal content, empty states, single-line status messages. For page-level layout, section headings, and feature presentations — always left. The content flows from a strong left edge, creating scannable vertical rhythm.

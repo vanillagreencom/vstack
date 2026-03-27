@@ -1,6 +1,6 @@
 # Professional Trading UI Design
 
-Stack-agnostic design principles for professional trading applications. Focused on density, signal-through-noise, modular panel architecture, and two-hue directional color. Does not define specific tokens, colors, or pixel values — those belong in your design system. This defines the principles, philosophy, and patterns your design system should embody.
+Stack-agnostic design principles for professional trading applications. Monospace-forward typography, zero-radius sharp corners, left-aligned grid layouts with 1px hairline separators, density-first thinking, two-hue directional color. Does not define specific tokens, colors, or pixel values — those belong in your design system. This defines the principles, philosophy, and patterns your design system should embody.
 
 ## Structure
 

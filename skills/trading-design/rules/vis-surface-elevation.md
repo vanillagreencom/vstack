@@ -26,9 +26,22 @@ Define 5 elevation levels. Each level has one job:
 ### Design Principles
 
 - **No custom backgrounds** — every background color in the application should map to one of these five levels. If you're defining a background that doesn't fit, the elevation system needs extension, not circumvention.
-- **No shadows** — in a near-black system, drop shadows are invisible or require unrealistic spread/opacity. Elevation through brightness is cleaner and more performant.
+- **No shadows** — in a near-black system, drop shadows are invisible or require unrealistic spread/opacity. Elevation through brightness is cleaner and more performant. This applies everywhere — modals, dropdowns, cards, popovers. Zero shadows.
 - **No gradients on surfaces** — gradients introduce visual noise. Flat surfaces at consistent elevation levels are easier to scan.
-- **Borders do the rest** — where brightness difference alone isn't enough to separate adjacent same-level elements, use a low-opacity neutral border (8-15%). This is cheaper than adding elevation levels.
+- **No rounded corners** — sharp edges on all elements. Rounded corners are a consumer aesthetic that softens precision. Trading interfaces require visual exactness — sharp corners reinforce that every edge is intentional.
+- **Borders and hairline gaps do the rest** — where brightness difference alone isn't enough to separate adjacent same-level elements, use low-opacity neutral borders (8-15%) or the 1px-gap grid pattern.
+
+### The 1px-Gap Grid Pattern
+
+The primary technique for creating structured, dense layouts: place elements inside a container whose background is the border color, with 1px gaps between children. The border color bleeds through the gaps to create hairline separators without any explicit border declarations on individual elements.
+
+This pattern creates a Bloomberg-terminal grid structure that:
+- Separates elements with minimal visual cost (1px)
+- Scales naturally — add more cells and the grid grows
+- Works for pricing tables, metric strips, plan comparisons, feature grids, data cards
+- Reads as "data infrastructure" rather than "spaced-out cards"
+
+The key: the container gets the border/separator color as its background, children get their own surface-level background, and the gap between children exposes the container's background as structure.
 
 ### Elevation in Context
 

@@ -15,7 +15,9 @@ vanillagreen
 
 ## Abstract
 
-Stack-agnostic design principles for professional trading applications, covering design philosophy, visual language (color theory, opacity, elevation), typography and density, modular panel architecture, data display conventions, interaction design, component philosophy, and accessibility. Prioritized from critical (philosophy, visual language, typography) through high (layout, data, interaction) to medium (components, accessibility).
+Stack-agnostic design principles for professional trading applications. Monospace-forward typography (mono for headings/labels/buttons/data, sans for prose only), zero-radius sharp corners on all elements, left-aligned grid layouts with 1px hairline separators, density-first thinking, two-hue directional color, opacity-driven depth. Covers design philosophy, visual language (color theory, opacity, elevation), typography and density, modular panel architecture, data display conventions, interaction design, component philosophy, and accessibility. Prioritized from critical (philosophy, visual language, typography) through high (layout, data, interaction) to medium (components, accessibility).
+
+> **Important:** This compiled document may lag behind the individual rule files in `rules/`. When in doubt, the individual rule files are the source of truth.
 
 ---
 
@@ -381,8 +383,8 @@ Two font categories. No exceptions. No third font.
 
 | Category | Font Type | Used For |
 |----------|-----------|----------|
-| **UI chrome** | Sans-serif | Labels, headers, navigation, panel titles, button text (non-numeric), tooltips |
-| **Data** | Monospace | Prices, quantities, P&L, timestamps, order IDs, account numbers, percentages, numeric button content |
+| **Structural / Identity** | Monospace | Headings, section labels, navigation, button text, status indicators, form labels, panel titles, badges, all numeric data (prices, quantities, P&L, timestamps, order IDs, percentages) |
+| **Prose / Description** | Sans-serif | Body paragraphs, descriptive copy, tooltips, help text, long-form explanations — anything that reads as a sentence |
 
 #### Why This Matters
 
@@ -393,7 +395,7 @@ Monospace fonts guarantee that:
 
 Sans-serif fonts guarantee that:
 - **Labels are compact** — proportional width means shorter strings for the same text, saving horizontal space
-- **Chrome is subordinate** — the visual difference between sans and mono creates an automatic hierarchy: monospace data feels "heavier" and more important
+- **Prose stays subordinate** — the visual difference between mono headings and sans body creates automatic hierarchy without needing size jumps
 
 #### Critical: Tabular/Lining Figures
 
@@ -825,7 +827,7 @@ ShadCN/ui demonstrates excellent component design principles: consistent tokens,
 | Comfortable line-height | Tight line-height (1.2-1.3) |
 | Standard 14-16px body text | 11-13px data text |
 | Card-based layouts with gaps | Edge-to-edge panels with minimal gaps |
-| Rounded corners (radius-md) | Minimal or no rounding (0-2px) |
+| Rounded corners (radius-md) | Zero radius. Sharp corners on everything — cards, buttons, inputs, modals, badges, dropdowns. No exceptions. |
 | Prominent hover states | Subtle hover (opacity shift, not color change) |
 
 The principle is the same (consistent, composable, token-driven) but the spatial budget is dramatically smaller.

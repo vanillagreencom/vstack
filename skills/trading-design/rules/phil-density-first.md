@@ -14,7 +14,7 @@ Density is the primary design constraint. Trading demands maximum data per pixel
 ### Principles
 
 - **Default compact, scale up only for readability** — start at the smallest comfortable size for each element. If a label, gap, or padding can be smaller without harming legibility, make it smaller.
-- **Pixel accountability** — decorative elements (gradients, large shadows, rounded corners, excessive padding) are costs. They must justify themselves against the data they displace.
+- **Pixel accountability** — decorative elements (gradients, shadows, rounded corners, excessive padding) are costs that cannot be justified. Zero radius on all elements. Zero shadows. Zero gradients on surfaces. These are not stylistic preferences — they are density requirements. Every rounded corner steals sub-pixel space from data. Every shadow adds visual noise that competes with content.
 - **Simultaneous visibility** — traders configure their workspace to see everything at once. A panel that requires scrolling to show its core content has failed the density test.
 - **Compact does not mean cramped** — density requires deliberate spacing at small scales. A 4px base unit with consistent multiples creates rhythm even at tight spacing. The goal is scannable density, not a wall of text.
 

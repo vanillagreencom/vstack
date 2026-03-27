@@ -26,6 +26,9 @@ Every visual element draws from a finite attention budget. Borders, shadows, bac
 - Box shadows for "depth" (near-black elevation handles this)
 - Animated transitions between states (instant state changes are faster to process)
 - Color-coded categories that aren't directional (adds hues without adding meaning)
+- Gradient text effects (decorative, adds no information, signals consumer product)
+- Centered layouts (force the eye to find the start of each line; left-alignment is faster to scan)
+- Rounded corners (visual softening that consumes sub-pixel space and signals approachability over precision)
 
 ### Earned Pixels
 
