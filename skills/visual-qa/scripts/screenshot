@@ -15,11 +15,20 @@ ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)"
 _vqa_conf="${VQA_CONFIG:-${ROOT_DIR}/visual-qa.conf}"
 [[ -f "$_vqa_conf" ]] && source "$_vqa_conf"
 
-VQA_APP_BINARY="${VQA_APP_BINARY:-$ROOT_DIR/target/debug/ht-app}"
-VQA_BUILD_CMD="${VQA_BUILD_CMD:-cargo build -p ht-app --features dev}"
-VQA_SCREENSHOT_ENV_KEY="${VQA_SCREENSHOT_ENV_KEY:-HT_SCREENSHOT_DIR}"
-VQA_LAYOUT_ENV_KEY="${VQA_LAYOUT_ENV_KEY:-HT_LAYOUT_FIXTURE}"
-VQA_DEFAULT_LAYOUT_ENV="${VQA_DEFAULT_LAYOUT_ENV:-HT_DEFAULT_LAYOUT=1}"
+# Required config — must be set via visual-qa.conf or environment
+_require_config() {
+    local var="$1" desc="$2"
+    if [[ -z "${!var:-}" ]]; then
+        fail "$var not configured. Set it in visual-qa.conf or as an env var. ($desc)"
+    fi
+}
+
+_require_config VQA_APP_BINARY "path to the application binary"
+_require_config VQA_BUILD_CMD "command to build the application"
+_require_config VQA_SCREENSHOT_ENV_KEY "env var name the app reads for screenshot output dir"
+
+VQA_LAYOUT_ENV_KEY="${VQA_LAYOUT_ENV_KEY:-}"
+VQA_DEFAULT_LAYOUT_ENV="${VQA_DEFAULT_LAYOUT_ENV:-}"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -49,7 +58,7 @@ report_capture_failure() {
 
     if ! binary_has_dev_screenshot_support "$binary"; then
         stage="build/bootstrap"
-        cause="Binary $binary does not include the dev-only screenshot path required by HT_SCREENSHOT_DIR."
+        cause="Binary $binary does not include the dev-only screenshot path required by $VQA_SCREENSHOT_ENV_KEY."
         hint="Rebuild with: $VQA_BUILD_CMD, or rerun without --no-build."
     elif grep -qiE 'failed to (read|parse) layout fixture' "$stderr_file" 2>/dev/null; then
         stage="scenario/layout loading"
@@ -133,11 +142,13 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 # Set env vars
-SCREENSHOT_ENV=(${VQA_SCREENSHOT_ENV_KEY}="$OUTPUT_DIR" ${VQA_DEFAULT_LAYOUT_ENV})
+SCREENSHOT_ENV=(${VQA_SCREENSHOT_ENV_KEY}="$OUTPUT_DIR")
+[[ -n "$VQA_DEFAULT_LAYOUT_ENV" ]] && SCREENSHOT_ENV+=($VQA_DEFAULT_LAYOUT_ENV)
 if [[ -n "$LAYOUT" ]]; then
     if [[ ! -f "$LAYOUT" ]]; then
         fail "Layout fixture not found: $LAYOUT"
     fi
+    [[ -n "$VQA_LAYOUT_ENV_KEY" ]] || fail "VQA_LAYOUT_ENV_KEY not configured but --layout was passed"
     SCREENSHOT_ENV+=(${VQA_LAYOUT_ENV_KEY}="$LAYOUT")
 fi
 

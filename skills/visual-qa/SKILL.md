@@ -68,17 +68,19 @@ scripts/visual-qa <command> [args...]                             # Full interac
 
 ## Configuration
 
-Configure via `visual-qa.conf` in project root or environment variables:
+Requires `visual-qa.conf` in project root. Tools fail with a clear error if required variables are missing.
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| `VQA_APP_BINARY` | Path to app binary | `$ROOT/target/debug/$APP_NAME` |
-| `VQA_BUILD_CMD` | Build command | `cargo build` |
-| `VQA_WINDOW_TITLE` | Window title for detection | (app name) |
-| `VQA_SCREENSHOT_ENV_KEY` | Env var name for screenshot dir | `SCREENSHOT_DIR` |
-| `VQA_LAYOUT_ENV_KEY` | Env var name for layout fixture | `LAYOUT_FIXTURE` |
-| `VQA_MAP_ENV_KEY` | Env var name for map path | `VISUAL_QA_MAP_PATH` |
-| `VQA_DEFAULT_LAYOUT_ENV` | Default layout env assignment | `DEFAULT_LAYOUT=1` |
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `VQA_APP_BINARY` | Yes | Path to app binary |
+| `VQA_BUILD_CMD` | Yes | Build command |
+| `VQA_WINDOW_TITLE` | Yes | Window title for xdotool detection |
+| `VQA_SCREENSHOT_ENV_KEY` | Yes | Env var name the app reads for screenshot output dir |
+| `VQA_LAYOUT_ENV_KEY` | No | Env var name for layout fixture path |
+| `VQA_MAP_ENV_KEY` | No | Env var name for live map JSON path |
+| `VQA_DEFAULT_LAYOUT_ENV` | No | Default layout env assignment |
+
+**Multi-target**: Use `--target NAME` or `VQA_TARGET=NAME` to select a named target. Branch on `VQA_TARGET` in your `visual-qa.conf`. See `README.md` for examples.
 
 ## Rules
 

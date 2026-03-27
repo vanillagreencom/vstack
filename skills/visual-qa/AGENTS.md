@@ -16,20 +16,40 @@ Automated visual testing framework that launches applications in isolated virtua
 
 ## Configuration
 
-Create `visual-qa.conf` in project root to configure for your application:
+Create `visual-qa.conf` in your project root (required — tools fail without it):
 
 ```bash
-# visual-qa.conf
-VQA_APP_BINARY="target/debug/my-app"
+# visual-qa.conf — Required variables
+VQA_APP_BINARY="$ROOT_DIR/target/debug/my-app"
 VQA_BUILD_CMD="cargo build -p my-app --features dev"
 VQA_WINDOW_TITLE="My Application"
 VQA_SCREENSHOT_ENV_KEY="MY_APP_SCREENSHOT_DIR"
+
+# Optional — for apps with layout fixtures and live map support
 VQA_LAYOUT_ENV_KEY="MY_APP_LAYOUT_FIXTURE"
 VQA_MAP_ENV_KEY="MY_APP_MAP_PATH"
 VQA_DEFAULT_LAYOUT_ENV="MY_APP_DEFAULT_LAYOUT=1"
 ```
 
-Without config, defaults assume a standard Cargo project layout.
+### Multi-Target
+
+For projects with multiple testable binaries, branch on `VQA_TARGET` in your config:
+
+```bash
+# Default target
+VQA_APP_BINARY="$ROOT_DIR/target/debug/my-app"
+VQA_BUILD_CMD="cargo build -p my-app --features dev"
+VQA_WINDOW_TITLE="My App"
+VQA_SCREENSHOT_ENV_KEY="MY_APP_SCREENSHOT_DIR"
+
+if [[ "${VQA_TARGET:-}" == "viewer" ]]; then
+    VQA_APP_BINARY="$ROOT_DIR/target/debug/my-viewer"
+    VQA_BUILD_CMD="cargo build -p my-viewer"
+    VQA_WINDOW_TITLE="Component Viewer"
+fi
+```
+
+Select target: `scripts/visual-qa --target viewer start --build` or `VQA_TARGET=viewer scripts/screenshot`.
 
 ## Quick Reference
 
