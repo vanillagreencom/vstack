@@ -37,11 +37,12 @@ Patterns and rules for building Iced 0.14 applications with Elm-style state mana
    - 1.4 [Minimum Pane Size](#14-minimum-pane-size)
 2. [Development Practices](#2-development-practices) — **HIGH**
    - 2.1 [Validate API Before Use](#21-validate-api-before-use)
-   - 2.2 [Reactive Discipline](#22-reactive-discipline)
-   - 2.3 [Instrument Budgeted Paths](#23-instrument-budgeted-paths)
-   - 2.4 [No Redundant Event Subscriptions](#24-no-redundant-event-subscriptions)
-   - 2.5 [Press-and-Hold Input](#25-press-and-hold-input)
-   - 2.6 [Smoke Test After UI Changes](#26-smoke-test-after-ui-changes)
+   - 2.2 [Surface Selection](#22-surface-selection)
+   - 2.3 [Reactive Discipline](#23-reactive-discipline)
+   - 2.4 [Instrument Budgeted Paths](#24-instrument-budgeted-paths)
+   - 2.5 [No Redundant Event Subscriptions](#25-no-redundant-event-subscriptions)
+   - 2.6 [Press-and-Hold Input](#26-press-and-hold-input)
+   - 2.7 [Smoke Test After UI Changes](#27-smoke-test-after-ui-changes)
 3. [Cache & Multi-Window](#3-cache--multi-window) — **HIGH**
    - 3.1 [Trace Staleness Before Coding](#31-trace-staleness-before-coding)
    - 3.2 [Extend Existing Event Paths](#32-extend-existing-event-paths)
@@ -120,13 +121,47 @@ Practices that prevent common Iced development pitfalls — API drift, runtime p
 
 Iced 0.14 has significant breaking changes from 0.13. Always verify widget APIs, entry points, and trait signatures against current docs before assuming API shape.
 
-### 2.2 Reactive Discipline
+### 2.2 Surface Selection
+
+**Impact: HIGH (over-engineered widgets, unnecessary framework coupling, and brittle implementations)**
+
+Choose the simplest Iced surface that matches the problem:
+
+- Standard UI composition uses normal widgets.
+- Custom visuals and dense rendering use `Canvas` or `Shader` first.
+- Reserve `iced::advanced` for new control behavior or engine-level hooks the public APIs cannot express cleanly: custom widget semantics, hit-testing, focus, layout/event/runtime plumbing, renderer hooks, or custom subscriptions.
+
+**Incorrect (using `iced::advanced` for a purely visual surface):**
+
+```rust
+// Purely visual depth heat strip implemented as a custom advanced widget.
+struct DepthHeatStrip;
+
+impl<Message> advanced::Widget<Message, Theme, Renderer> for DepthHeatStrip {
+    // custom layout/event/runtime plumbing only to draw colored depth levels
+}
+```
+
+**Correct (use the public surface that matches the need):**
+
+```rust
+// Standard UI composition stays with normal widgets.
+row![watchlist, order_entry];
+
+// Dense visual surface uses Canvas/Shader first.
+Canvas::new(DepthHeatStripProgram { /* ... */ })
+
+// Reach for iced::advanced only if the surface needs custom hit-testing,
+// focus, layout/runtime behavior, or another engine-level hook.
+```
+
+### 2.3 Reactive Discipline
 
 **Impact: HIGH (unnecessary redraws, wasted GPU cycles, janky frame rates)**
 
 Never trigger redraws from `view()`. Invalidate caches explicitly in `update()`. Batch high-frequency data updates into ~16ms windows so `update()` sees bounded work and idle windows cause no redraw.
 
-### 2.3 Instrument Budgeted Paths
+### 2.4 Instrument Budgeted Paths
 
 **Impact: HIGH (performance regressions go undetected)**
 
@@ -158,19 +193,19 @@ let elem = iced::debug::time_with("subscription::drain", || {
 });
 ```
 
-### 2.4 No Redundant Event Subscriptions
+### 2.5 No Redundant Event Subscriptions
 
 **Impact: HIGH (duplicate event handling, wasted computation, subtle bugs)**
 
 Before adding a new `window::*` or event subscription, check whether the same event family already flows through an existing listener. Extend the existing path unless a separate subscription is required and benchmarked.
 
-### 2.5 Press-and-Hold Input
+### 2.6 Press-and-Hold Input
 
 **Impact: HIGH (hold actions fire on release instead of press)**
 
 `button(...).on_press(...)` fires on mouse-up (release). For true mouse-down behavior (repeat scroll, press-and-hold actions), use `mouse_area(...).on_press(...)`.
 
-### 2.6 Smoke Test After UI Changes
+### 2.7 Smoke Test After UI Changes
 
 **Impact: HIGH (runtime panics not caught by clippy)**
 

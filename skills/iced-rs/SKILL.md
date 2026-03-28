@@ -17,6 +17,7 @@ Patterns for building Iced 0.14 applications with Elm-style state management, pr
 Reference these guidelines when:
 - Implementing or modifying Iced views, widgets, or layouts
 - Working with pane_grid, Canvas, Shader, or Subscription
+- Choosing between normal widgets, `Canvas`/`Shader`, and `iced::advanced` for a new surface
 - Building custom themes or styling components
 - Debugging interaction issues (drag/drop, overlays, event routing)
 - Reviewing UI code for framework constraint violations
@@ -54,6 +55,7 @@ App > Window > Shell > Zone > TitleBar > Panel > Canvas > Overlay
 ### 2. Development Practices (HIGH)
 
 - `dev-validate-api` - Verify API against docs; Iced 0.14 has breaking changes from 0.13
+- `dev-surface-selection` - Use normal widgets for standard UI, `Canvas`/`Shader` for custom visuals, and `iced::advanced` only for new control behavior
 - `dev-reactive-discipline` - Never redraw from view(), invalidate caches explicitly, batch ~16ms
 - `dev-instrument-budgets` - iced::debug::time on every function with a performance budget
 - `dev-no-redundant-subscriptions` - Extend existing event listeners before adding new ones
