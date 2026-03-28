@@ -82,7 +82,7 @@ vstack remove rust-safety
 Projects can keep local package configuration in `.env.local`. Copy [.env.local.example](./.env.local.example) to `.env.local`, then fill only the variables your project uses.
 
 - Use `.env.local` for project-level workflow config such as worktree behavior, issue-tracker tokens, bot auth, and optional orchestration helpers like `VISUAL_QA_TARGET_CMD`.
-- Keep tool-specific Visual QA runtime config in `visual-qa.conf`. The `VISUAL_QA_*` variables in `.env.local` are only workflow helpers for target selection, smoke tests, visual batteries, and baseline routing.
+- Keep tool-specific Visual QA runtime config in `visual-qa.conf`. The visual-qa-desktop skill ships [`skills/visual-qa-desktop/visual-qa.conf.example`](./skills/visual-qa-desktop/visual-qa.conf.example) as the template to copy into your project root. The `VISUAL_QA_*` variables in `.env.local` are only workflow helpers for target selection, smoke tests, visual batteries, and baseline routing.
 - The `worktree` skill symlinks `.env.local` into created worktrees so those settings stay available in delegated sessions.
 
 ## How It Works
@@ -105,7 +105,7 @@ Package dependencies are currently skill-to-skill dependencies. A skill can decl
 ```yaml
 dependencies:
   required: [linear, orchestration, decider]
-  optional: [benchmarking, visual-qa]
+  optional: [benchmarking, visual-qa-desktop]
 ```
 
 `vstack` builds a dependency graph from installed skills and auto-adds only `required` dependencies. `optional` dependencies are preserved as metadata/documentation, but are not auto-installed.
@@ -114,7 +114,7 @@ dependencies:
 
 ```toml
 [agent-skills]
-iced = ["iced-rs", "visual-qa"]
+iced = ["iced-rs", "visual-qa-desktop"]
 
 [role-skills]
 engineer = ["issue-lifecycle", "github", "worktree"]
@@ -241,7 +241,7 @@ Windows note:
 | `iced-rs` | Iced 0.14 patterns, reactive UI rules, and Elm-style structure. | — |
 | `price-handling` | Price rounding, epsilon comparison, and market-price handling. | — |
 | `trading-design` | Dense, professional trading-style interface design guidance. | — |
-| `visual-qa` | Screenshot testing, visual baselines, OCR targeting, and UI verification. | <ul><li><code>/visual-qa setup</code></li><li><code>/visual-qa start [--build] [--size WxH] [--layout FILE]</code></li><li><code>/visual-qa stop</code></li><li><code>/visual-qa screenshot [--output PATH]</code></li><li><code>/visual-qa baseline capture</code></li><li><code>/visual-qa baseline check</code></li></ul> |
+| `visual-qa-desktop` | Screenshot testing, visual baselines, OCR targeting, and UI verification. | <ul><li><code>/visual-qa-desktop setup</code></li><li><code>/visual-qa-desktop start [--build] [--size WxH] [--layout FILE]</code></li><li><code>/visual-qa-desktop stop</code></li><li><code>/visual-qa-desktop screenshot [--output PATH]</code></li><li><code>/visual-qa-desktop baseline capture</code></li><li><code>/visual-qa-desktop baseline check</code></li></ul> |
 
 #### Workflow / Platform (WIP)
 

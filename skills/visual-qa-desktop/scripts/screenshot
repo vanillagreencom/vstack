@@ -198,7 +198,7 @@ if [[ "$(uname -s)" != "Darwin" ]] && [[ -z "${DISPLAY:-}" ]] && [[ -z "${WAYLAN
     echo "FAIL: No display available" >&2
     echo "stage: display setup" >&2
     echo "cause: Neither DISPLAY nor WAYLAND_DISPLAY is set." >&2
-    echo "hint: Run inside a desktop session or use visual-qa start for an isolated Xvfb session." >&2
+    echo "hint: Run inside a desktop session or use visual-qa-desktop start for an isolated Xvfb session." >&2
     exit 1
 fi
 

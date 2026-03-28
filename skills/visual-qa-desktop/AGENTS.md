@@ -1,4 +1,4 @@
-# Visual QA
+# Visual QA Desktop
 
 **Version 1.1.0**
 vanillagreen
@@ -81,8 +81,8 @@ if [[ "${VQA_TARGET:-}" == "viewer" ]]; then
 fi
 ```
 
-Select target: `scripts/visual-qa --target viewer start --build` or `VQA_TARGET=viewer scripts/screenshot`.
-Compatibility aliases also exist for repos that already call `tools/visual-qa` and `tools/screenshot`.
+Select target: `scripts/visual-qa-desktop --target viewer start --build` or `VQA_TARGET=viewer scripts/screenshot`.
+Compatibility aliases also exist for repos that already call `tools/visual-qa-desktop` and `tools/screenshot`.
 
 ## Quick Reference
 
@@ -90,10 +90,10 @@ Compatibility aliases also exist for repos that already call `tools/visual-qa` a
 |-------------|------|
 | "Take a screenshot" | `scripts/screenshot --no-build` → Read the PNG |
 | "Screenshot with layout" | `scripts/screenshot --no-build --layout path/to/layout-fixture` |
-| "Show pane/split map" | `scripts/visual-qa map` on targets with live-map support |
+| "Show pane/split map" | `scripts/visual-qa-desktop map` on targets with live-map support |
 | "Test if drag/resize works" | Start interactive session |
-| "Did the UI change?" | `scripts/visual-qa baseline check` |
-| "Capture baselines" | `scripts/visual-qa baseline capture` |
+| "Did the UI change?" | `scripts/visual-qa-desktop baseline check` |
+| "Capture baselines" | `scripts/visual-qa-desktop baseline capture` |
 | "Full visual QA" | Interactive session with full checklist |
 
 ## Interactive Session Lifecycle
@@ -105,16 +105,16 @@ Ask user before launching. On Linux: "I'll launch in an isolated virtual display
 ### 2. Start
 
 ```bash
-scripts/visual-qa start --build                    # First time or after code changes
-scripts/visual-qa start --layout path/to/layout-fixture # Specific layout
-scripts/visual-qa start                             # Reuse existing binary
+scripts/visual-qa-desktop start --build                    # First time or after code changes
+scripts/visual-qa-desktop start --layout path/to/layout-fixture # Specific layout
+scripts/visual-qa-desktop start                             # Reuse existing binary
 ```
 
 ### 3. Map the Layout
 
 ```bash
-scripts/visual-qa map              # Pane rectangles, split handles, tab membership
-scripts/visual-qa locate --all     # All visible text with positions
+scripts/visual-qa-desktop map              # Pane rectangles, split handles, tab membership
+scripts/visual-qa-desktop locate --all     # All visible text with positions
 ```
 
 If the selected target does not expose a live map, skip `map` and rely on `locate`, `status`, `click`, and `screenshot`. Do not use pane helpers on screenshot/OCR-only targets.
@@ -122,9 +122,9 @@ If the selected target does not expose a live map, skip `map` and rely on `locat
 ### 4. Interact + Verify
 
 ```bash
-scripts/visual-qa click $(scripts/visual-qa locate "Chart")
-scripts/visual-qa screenshot
-scripts/visual-qa map    # Re-map after layout-changing actions
+scripts/visual-qa-desktop click $(scripts/visual-qa-desktop locate "Chart")
+scripts/visual-qa-desktop screenshot
+scripts/visual-qa-desktop map    # Re-map after layout-changing actions
 ```
 
 **CRITICAL**: After layout-changing actions, call `map` again on map-capable targets. Never batch multiple layout-changing actions with pre-computed coordinates.
@@ -132,7 +132,7 @@ scripts/visual-qa map    # Re-map after layout-changing actions
 ### 5. Cleanup (always)
 
 ```bash
-scripts/visual-qa stop
+scripts/visual-qa-desktop stop
 ```
 
 ## Commands
@@ -174,16 +174,16 @@ scripts/visual-qa stop
 
 ```bash
 # Find element by OCR
-scripts/visual-qa locate "Chart"                           # Returns "X Y"
-scripts/visual-qa locate "Chart" --near 500 400            # Disambiguate
-scripts/visual-qa locate "Chart" --y-range 25 70           # Tab bar only
-scripts/visual-qa locate --all                              # Dump all text
+scripts/visual-qa-desktop locate "Chart"                           # Returns "X Y"
+scripts/visual-qa-desktop locate "Chart" --near 500 400            # Disambiguate
+scripts/visual-qa-desktop locate "Chart" --y-range 25 70           # Tab bar only
+scripts/visual-qa-desktop locate --all                              # Dump all text
 
 # Click on found element
-scripts/visual-qa click $(scripts/visual-qa locate "Chart")
+scripts/visual-qa-desktop click $(scripts/visual-qa-desktop locate "Chart")
 
 # Drag between elements
-scripts/visual-qa drag $(scripts/visual-qa locate "Watchlist") $(scripts/visual-qa locate "Positions")
+scripts/visual-qa-desktop drag $(scripts/visual-qa-desktop locate "Watchlist") $(scripts/visual-qa-desktop locate "Positions")
 ```
 
 **Tab labels vs body text**: Use `--y-range` to constrain search to tab bar areas when tab text matches body content.
@@ -191,11 +191,11 @@ scripts/visual-qa drag $(scripts/visual-qa locate "Watchlist") $(scripts/visual-
 ## Mid-Drag Screenshots
 
 ```bash
-scripts/visual-qa mousedown X Y     # Press on tab label
-scripts/visual-qa move X2 Y2        # Move 10+ px to start drag
-scripts/visual-qa move X3 Y3        # Move to target drop zone
-scripts/visual-qa screenshot         # Capture overlay state
-scripts/visual-qa mouseup            # Release
+scripts/visual-qa-desktop mousedown X Y     # Press on tab label
+scripts/visual-qa-desktop move X2 Y2        # Move 10+ px to start drag
+scripts/visual-qa-desktop move X3 Y3        # Move to target drop zone
+scripts/visual-qa-desktop screenshot         # Capture overlay state
+scripts/visual-qa-desktop mouseup            # Release
 ```
 
 ## Timing
@@ -208,8 +208,8 @@ scripts/visual-qa mouseup            # Release
 ## Baselines
 
 ```bash
-scripts/visual-qa baseline capture    # Save golden reference
-scripts/visual-qa baseline check      # Compare against baselines
+scripts/visual-qa-desktop baseline capture    # Save golden reference
+scripts/visual-qa-desktop baseline check      # Compare against baselines
 ```
 
 Baseline capture/check require `VQA_SUPPORTS_BASELINE=true`. Disable baseline support for screenshot-only or viewer-only targets that do not have stable fixture coverage. Fixture discovery for `baseline capture/check` is configurable via `VQA_BASELINE_FIXTURE_GLOB`; the default is `*.ron` for backward compatibility.
@@ -225,4 +225,4 @@ All coordinates are physical pixels. Screenshots, xdotool, and `locate` share th
 Linux: xdotool, maim, ffmpeg, ImageMagick, Xvfb, vulkan-swrast, tesseract (+ eng data)
 macOS: cliclick, ffmpeg, ImageMagick, tesseract (screencapture built-in)
 
-Run `scripts/visual-qa setup` to check dependencies.
+Run `scripts/visual-qa-desktop setup` to check dependencies.

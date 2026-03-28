@@ -1,5 +1,5 @@
 ---
-name: visual-qa
+name: visual-qa-desktop
 description: Visual QA framework — screenshot capture, interactive testing in virtual displays, OCR-based element targeting, and baseline regression detection. Use when asked to take a screenshot, test UI interactions, verify drag/drop behavior, capture visual baselines, or run regression checks.
 license: MIT
 user-invocable: true
@@ -8,7 +8,7 @@ metadata:
   version: "1.1.0"
 ---
 
-# Visual QA
+# Visual QA Desktop
 
 Automated visual testing in isolated virtual displays with screenshot capture, OCR-based element targeting, and baseline regression detection.
 
@@ -25,10 +25,10 @@ Reference these guidelines when:
 
 ```bash
 scripts/screenshot [--target NAME] [--no-build] [--timeout N] [--layout FILE]   # Single screenshot
-scripts/visual-qa [--target NAME] <command> [args...]                            # Full interactive session
+scripts/visual-qa-desktop [--target NAME] <command> [args...]                            # Full interactive session
 # Compatibility aliases for repos that already call tools/
 tools/screenshot ...
-tools/visual-qa ...
+tools/visual-qa-desktop ...
 ```
 
 ## Quick Reference — Pick the Right Tool
@@ -36,20 +36,20 @@ tools/visual-qa ...
 | User request | What to do |
 |-------------|-----------|
 | "Take a screenshot" | `scripts/screenshot --no-build` → Read the PNG |
-| "Show pane/split map" | `scripts/visual-qa map` if the selected target exposes a live map |
+| "Show pane/split map" | `scripts/visual-qa-desktop map` if the selected target exposes a live map |
 | "Test if drag/resize works" | Start interactive session (see below) |
-| "Did the UI change?" | `scripts/visual-qa baseline check` |
-| "Capture baselines" | `scripts/visual-qa baseline capture` |
+| "Did the UI change?" | `scripts/visual-qa-desktop baseline check` |
+| "Capture baselines" | `scripts/visual-qa-desktop baseline capture` |
 | "Full visual QA" | Interactive session with full checklist |
 
 ## Interactive Session Lifecycle
 
-1. **Start**: `scripts/visual-qa start [--build] [--layout FILE]`
+1. **Start**: `scripts/visual-qa-desktop start [--build] [--layout FILE]`
 2. **Inspect capabilities**:
-   - If the target supports live map geometry, use `scripts/visual-qa map` + `scripts/visual-qa locate --all`
+   - If the target supports live map geometry, use `scripts/visual-qa-desktop map` + `scripts/visual-qa-desktop locate --all`
    - If the target is screenshot/OCR-only, skip `map` and use `locate`, `status`, `click`, `screenshot`
 3. **Interact + verify**: click/drag/screenshot, re-map after layout changes only when map support exists
-4. **Cleanup**: `scripts/visual-qa stop`
+4. **Cleanup**: `scripts/visual-qa-desktop stop`
 
 ## Commands
 
@@ -117,7 +117,7 @@ Requires `visual-qa.conf` in project root. Tools fail with a clear error if requ
 
 ### Session Discipline (HIGH)
 
-- **Always stop on exit** — `scripts/visual-qa stop` even on failure
+- **Always stop on exit** — `scripts/visual-qa-desktop stop` even on failure
 - **Targeted scope by default** — test only what's relevant to the change, not the full checklist
 - **Confirm with user on Linux** — "I'll launch in an isolated virtual display"
 
@@ -126,7 +126,7 @@ Requires `visual-qa.conf` in project root. Tools fail with a clear error if requ
 Linux: xdotool, maim, ffmpeg, ImageMagick, Xvfb, vulkan-swrast, tesseract (+ eng data)
 macOS: cliclick, ffmpeg, ImageMagick, tesseract (screencapture built-in)
 
-Run `scripts/visual-qa setup` to check.
+Run `scripts/visual-qa-desktop setup` to check.
 
 ## Full Compiled Document
 

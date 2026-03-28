@@ -1,12 +1,12 @@
-# Visual QA
+# Visual QA Desktop
 
 Automated visual testing in isolated virtual displays with OCR-based element targeting and baseline regression detection.
 
 ## Structure
 
-- `scripts/visual-qa` - Main interactive testing tool (2250+ lines)
+- `scripts/visual-qa-desktop` - Main interactive testing tool (2250+ lines)
 - `scripts/screenshot` - Standalone single-screenshot capture
-- `tools/visual-qa` - Compatibility wrapper for repos that already call `tools/...`
+- `tools/visual-qa-desktop` - Compatibility wrapper for repos that already call `tools/...`
 - `tools/screenshot` - Compatibility wrapper for repos that already call `tools/...`
 - **`SKILL.md`** - Quick-reference index for skill-aware harnesses
 - **`AGENTS.md`** - Full compiled document for all harnesses
@@ -15,7 +15,7 @@ Automated visual testing in isolated virtual displays with OCR-based element tar
 
 ### 1. Create `visual-qa.conf` (required)
 
-Create `visual-qa.conf` in your project root. The tools will not run without it.
+Copy [`visual-qa.conf.example`](./visual-qa.conf.example) to `visual-qa.conf` in your project root, then fill in your app-specific values. The tools will not run without it.
 
 ```bash
 # visual-qa.conf — Required configuration
@@ -135,11 +135,11 @@ fi
 Select target via env var or `--target` flag:
 
 ```bash
-VQA_TARGET=viewer scripts/visual-qa start --build
-scripts/visual-qa --target viewer start --build    # equivalent
+VQA_TARGET=viewer scripts/visual-qa-desktop start --build
+scripts/visual-qa-desktop --target viewer start --build    # equivalent
 scripts/screenshot --no-build                       # uses default target
 VQA_TARGET=viewer scripts/screenshot --no-build     # uses viewer target
-tools/visual-qa start --build                       # compatibility alias
+tools/visual-qa-desktop start --build                       # compatibility alias
 ```
 
 If a target disables layout/map/baseline support, use screenshot/OCR/status flows only for that target. Pane helpers (`map`, `resize-pane`, `tab-transfer`, `maximize`, `restore`) require live-map support.
@@ -157,4 +157,4 @@ Core tool configuration lives in `visual-qa.conf`. Optional workflow helper vari
 Linux: xdotool, maim, ffmpeg, ImageMagick, Xvfb, vulkan-swrast, tesseract
 macOS: cliclick, ffmpeg, ImageMagick, tesseract
 
-Run `scripts/visual-qa setup` to check.
+Run `scripts/visual-qa-desktop setup` to check.

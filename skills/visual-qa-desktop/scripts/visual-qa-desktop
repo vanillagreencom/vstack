@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# visual-qa - Automated visual QA in isolated virtual display
+# visual-qa-desktop - Automated visual QA in isolated virtual display
 #
 # Launches app inside Xvfb (Linux) so the user's real display is untouched.
 # Provides primitives for automation agents to drive interactions and capture screenshots.
 #
-# Location: scripts/visual-qa
+# Location: scripts/visual-qa-desktop
 #
-# Usage: visual-qa <command> [args...]
+# Usage: visual-qa-desktop <command> [args...]
 # Commands: setup start watch screenshot click double-click right-click
 #           drag mousedown mouseup move key type window-info map
 #           status doctor record baseline locate cursor-pos
@@ -17,7 +17,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-SESSION_FILE="${VISUAL_QA_SESSION:-/tmp/visual-qa-session.json}"
+SESSION_FILE="${VISUAL_QA_SESSION:-/tmp/visual-qa-desktop-session.json}"
 
 _vqa_rewritten_args=()
 while [[ $# -gt 0 ]]; do
@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --target)
             [[ $# -ge 2 ]] || {
-                echo "ERROR: Usage: visual-qa [--target NAME] <command> [args...]" >&2
+                echo "ERROR: Usage: visual-qa-desktop [--target NAME] <command> [args...]" >&2
                 exit 1
             }
             export VQA_TARGET="$2"
@@ -165,7 +165,7 @@ _require_baseline_support() {
 _SESSION_CACHE=""
 
 session_get() {
-    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: visual-qa start"
+    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: visual-qa-desktop start"
     if [[ -z "$_SESSION_CACHE" ]]; then
         _SESSION_CACHE=$(cat "$SESSION_FILE")
     fi
@@ -177,7 +177,7 @@ session_display() {
 }
 
 require_session() {
-    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: visual-qa start"
+    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: visual-qa-desktop start"
     if [[ -z "$_SESSION_CACHE" ]]; then
         _SESSION_CACHE=$(cat "$SESSION_FILE")
     fi
@@ -201,7 +201,7 @@ _map_path() {
     _require_map_support
     local path
     path=$(session_get map_path)
-    [[ -n "$path" ]] || die "No live visual-qa map configured for this session"
+    [[ -n "$path" ]] || die "No live visual-qa-desktop map configured for this session"
     echo "$path"
 }
 
@@ -209,7 +209,7 @@ _map_json() {
     require_session
     local path
     path=$(_map_path)
-    _wait_for_file "$path" 30 || die "Live visual-qa map not ready: $path"
+    _wait_for_file "$path" 30 || die "Live visual-qa-desktop map not ready: $path"
     cat "$path"
 }
 
@@ -784,7 +784,7 @@ cmd_screenshot() {
 }
 
 cmd_click() {
-    [[ $# -ge 2 ]] || die "Usage: visual-qa click X Y"
+    [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop click X Y"
     require_session
     _invalidate_ocr_cache
     local x="$1" y="$2"
@@ -807,7 +807,7 @@ cmd_click() {
 }
 
 cmd_double_click() {
-    [[ $# -ge 2 ]] || die "Usage: visual-qa double-click X Y"
+    [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop double-click X Y"
     require_session
     _invalidate_ocr_cache
     local x="$1" y="$2"
@@ -830,7 +830,7 @@ cmd_double_click() {
 }
 
 cmd_right_click() {
-    [[ $# -ge 2 ]] || die "Usage: visual-qa right-click X Y"
+    [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop right-click X Y"
     require_session
     _invalidate_ocr_cache
     local x="$1" y="$2"
@@ -853,7 +853,7 @@ cmd_right_click() {
 }
 
 cmd_drag() {
-    [[ $# -ge 4 ]] || die "Usage: visual-qa drag X1 Y1 X2 Y2 [--steps N]"
+    [[ $# -ge 4 ]] || die "Usage: visual-qa-desktop drag X1 Y1 X2 Y2 [--steps N]"
     require_session
     _invalidate_ocr_cache
     local x1="$1" y1="$2" x2="$3" y2="$4"
@@ -897,7 +897,7 @@ cmd_drag() {
 }
 
 cmd_mousedown() {
-    [[ $# -ge 2 ]] || die "Usage: visual-qa mousedown X Y [--button N]"
+    [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop mousedown X Y [--button N]"
     require_session
     _invalidate_ocr_cache
     local x="$1" y="$2"
@@ -953,7 +953,7 @@ cmd_mouseup() {
 }
 
 cmd_move() {
-    [[ $# -ge 2 ]] || die "Usage: visual-qa move X Y"
+    [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop move X Y"
     require_session
     local x="$1" y="$2"
     local platform display wid
@@ -973,7 +973,7 @@ cmd_move() {
 }
 
 cmd_key() {
-    [[ $# -ge 1 ]] || die "Usage: visual-qa key KEY"
+    [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop key KEY"
     require_session
     _invalidate_ocr_cache
     local key="$1"
@@ -994,7 +994,7 @@ cmd_key() {
 }
 
 cmd_type() {
-    [[ $# -ge 1 ]] || die "Usage: visual-qa type \"text\""
+    [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop type \"text\""
     require_session
     _invalidate_ocr_cache
     local text="$1"
@@ -1148,7 +1148,7 @@ cmd_doctor() {
 }
 
 cmd_record() {
-    [[ $# -ge 1 ]] || die "Usage: visual-qa record start|stop [--output PATH]"
+    [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop record start|stop [--output PATH]"
     require_session
     _resolve_screenshot_dir
     local subcmd="$1"; shift
@@ -1272,7 +1272,7 @@ cmd_watch() {
 }
 
 cmd_baseline() {
-    [[ $# -ge 1 ]] || die "Usage: visual-qa baseline capture|check [options]"
+    [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop baseline capture|check [options]"
     local subcmd="$1"; shift
 
     case "$subcmd" in
@@ -1385,7 +1385,7 @@ _baseline_run() {
             local preflight_hint="Rebuild with: $VQA_BUILD_CMD, or rerun baseline capture without --no-build."
 
             cat > "$preflight_log" <<EOF
-FAIL: visual-qa baseline preflight failed
+FAIL: visual-qa-desktop baseline preflight failed
 stage: build/bootstrap
 cause: $preflight_error
 hint: $preflight_hint
@@ -1539,7 +1539,7 @@ EOF
 
     local report="$output_dir/baseline-report.json"
     jq -n \
-        --arg agent "visual-qa" \
+        --arg agent "visual-qa-desktop" \
         --arg mode "$mode" \
         --arg timestamp "$(date +%Y-%m-%dT%H:%M:%S%z)" \
         --arg verdict "$verdict" \
@@ -1593,8 +1593,8 @@ EOF
 # Cache last OCR TSV to avoid re-running tesseract for sequential locate calls.
 # Invalidated on screenshot, click, drag, or any interaction command.
 # Uses a file-based stamp so the cache persists across separate invocations.
-_OCR_CACHE_FILE="/tmp/visual-qa-ocr-cache.tsv"
-_OCR_CACHE_STAMP="/tmp/visual-qa-ocr-cache.stamp"
+_OCR_CACHE_FILE="/tmp/visual-qa-desktop-ocr-cache.tsv"
+_OCR_CACHE_STAMP="/tmp/visual-qa-desktop-ocr-cache.stamp"
 
 _invalidate_ocr_cache() {
     rm -f "$_OCR_CACHE_FILE" "$_OCR_CACHE_STAMP"
@@ -1627,7 +1627,7 @@ _get_ocr_tsv() {
             ;;
         darwin)
             local tmp_capture
-            tmp_capture=$(mktemp /tmp/visual-qa-ocr.XXXXXX)
+            tmp_capture=$(mktemp /tmp/visual-qa-desktop-ocr.XXXXXX)
             if ! screencapture -x -l "$wid" "$tmp_capture" 2>/dev/null; then
                 screencapture -x "$tmp_capture" 2>/dev/null || true
             fi
@@ -1650,7 +1650,7 @@ _get_ocr_tsv() {
 }
 
 cmd_locate() {
-    [[ $# -ge 1 ]] || die "Usage: visual-qa locate \"text\" [--all] [--near X Y]"
+    [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop locate \"text\" [--all] [--near X Y]"
     require_session
 
     local search="" opt_all=false near_x="" near_y="" y_min="" y_max="" min_conf=50
@@ -1689,7 +1689,7 @@ cmd_locate() {
         return 0
     fi
 
-    [[ -n "$search" ]] || die "Usage: visual-qa locate \"text\" [--all] [--near X Y]"
+    [[ -n "$search" ]] || die "Usage: visual-qa-desktop locate \"text\" [--all] [--near X Y]"
 
     # Parse TSV: group words by block_num + line_num, match search text
     # Tesseract TSV columns (awk $-fields):
@@ -1893,7 +1893,7 @@ _matching_split_json() {
 }
 
 cmd_resize_pane() {
-    [[ $# -ge 3 ]] || die "Usage: visual-qa resize-pane \"pane A\" \"pane B\" DELTA_PX"
+    [[ $# -ge 3 ]] || die "Usage: visual-qa-desktop resize-pane \"pane A\" \"pane B\" DELTA_PX"
     require_session
     local pane_a_title="$1" pane_b_title="$2" delta="$3"
 
@@ -2033,13 +2033,13 @@ cmd_resize_pane() {
 }
 
 cmd_assert() {
-    [[ $# -ge 1 ]] || die "Usage: visual-qa assert <subcommand> [...]"
+    [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop assert <subcommand> [...]"
     require_session
 
     local subcmd="$1"; shift
     case "$subcmd" in
         pane-count)
-            [[ $# -ge 1 ]] || die "Usage: visual-qa assert pane-count N"
+            [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop assert pane-count N"
             local expected actual
             expected="$1"
             actual=$(echo "$(_map_json)" | jq '.panes | length')
@@ -2047,7 +2047,7 @@ cmd_assert() {
                 die "Expected $expected panes, found $actual"
             ;;
         window-size)
-            [[ $# -ge 2 ]] || die "Usage: visual-qa assert window-size WIDTH HEIGHT"
+            [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop assert window-size WIDTH HEIGHT"
             local expected_w expected_h actual_w actual_h
             expected_w="$1"; expected_h="$2"
             actual_w=$(echo "$(_map_json)" | jq '.window_rect.width | round')
@@ -2056,14 +2056,14 @@ cmd_assert() {
                 die "Expected window ${expected_w}x${expected_h}, found ${actual_w}x${actual_h}"
             ;;
         tab-present)
-            [[ $# -ge 1 ]] || die "Usage: visual-qa assert tab-present \"TITLE\""
+            [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop assert tab-present \"TITLE\""
             local title count
             title="$1"
             count=$(echo "$(_map_json)" | jq --arg title "$title" '[.panes[].titles[] | select(. == $title)] | length')
             [[ "$count" -gt 0 ]] || die "Tab not present in live map: \"$title\""
             ;;
         tab-in-pane)
-            [[ $# -ge 2 ]] || die "Usage: visual-qa assert tab-in-pane \"TAB\" \"PANE TITLE\""
+            [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop assert tab-in-pane \"TAB\" \"PANE TITLE\""
             local tab_title pane_title pane_json has_tab
             tab_title="$1"; pane_title="$2"
             pane_json=$(_unique_pane_json "$pane_title")
@@ -2072,7 +2072,7 @@ cmd_assert() {
                 die "Tab \"$tab_title\" not found in pane \"$pane_title\""
             ;;
         tab-order)
-            [[ $# -ge 2 ]] || die "Usage: visual-qa assert tab-order \"PANE\" \"TAB A\" \"TAB B\" [...]"
+            [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop assert tab-order \"PANE\" \"TAB A\" \"TAB B\" [...]"
             local pane_spec pane_json expected actual
             pane_spec="$1"
             shift
@@ -2083,7 +2083,7 @@ cmd_assert() {
                 die "Expected tab order $expected in pane \"$pane_spec\", found $actual"
             ;;
         pane-left-of|pane-right-of|pane-above|pane-below)
-            [[ $# -ge 2 ]] || die "Usage: visual-qa assert $subcmd \"PANE A\" \"PANE B\""
+            [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop assert $subcmd \"PANE A\" \"PANE B\""
             local pane_a pane_b rect_a rect_b
             pane_a=$(_unique_pane_json "$1")
             pane_b=$(_unique_pane_json "$2")
@@ -2109,7 +2109,7 @@ cmd_assert() {
             esac
             ;;
         maximized)
-            [[ $# -ge 1 ]] || die "Usage: visual-qa assert maximized \"PANE\""
+            [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop assert maximized \"PANE\""
             local expected_pane map_json
             expected_pane="$1"
             map_json=$(_map_json)
@@ -2138,7 +2138,7 @@ cmd_assert() {
 }
 
 cmd_drop_tab() {
-    [[ $# -ge 1 ]] || die "Usage: visual-qa drop-tab \"SOURCE\" (--edge EDGE | --pane PANE --region REGION [--after TAB])"
+    [[ $# -ge 1 ]] || die "Usage: visual-qa-desktop drop-tab \"SOURCE\" (--edge EDGE | --pane PANE --region REGION [--after TAB])"
     require_session
 
     local src_name="$1"
@@ -2162,7 +2162,7 @@ cmd_drop_tab() {
         read -r drop_x drop_y <<< "$(_center_of_rect "$(echo "$target_json" | jq -c '.rect')")"
     else
         [[ -n "$pane_spec" && -n "$region" ]] ||
-            die "Usage: visual-qa drop-tab \"SOURCE\" (--edge EDGE | --pane PANE --region REGION [--after TAB])"
+            die "Usage: visual-qa-desktop drop-tab \"SOURCE\" (--edge EDGE | --pane PANE --region REGION [--after TAB])"
         target_json=$(_pane_drop_target_json "$pane_spec" "$region")
         [[ -n "$target_json" && "$target_json" != "null" ]] || die "Pane target not found: \"$pane_spec\" region \"$region\""
 
@@ -2184,7 +2184,7 @@ cmd_drop_tab() {
 }
 
 cmd_reorder_tab() {
-    [[ $# -ge 2 ]] || die "Usage: visual-qa reorder-tab \"SOURCE\" \"ANCHOR\""
+    [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop reorder-tab \"SOURCE\" \"ANCHOR\""
     local src_name="$1" anchor="$2"
     local pane_json pane_id
     pane_json=$(_unique_pane_json "$anchor")
@@ -2193,7 +2193,7 @@ cmd_reorder_tab() {
 }
 
 cmd_tab_transfer() {
-    [[ $# -ge 2 ]] || die "Usage: visual-qa tab-transfer \"source tab\" \"target tab\""
+    [[ $# -ge 2 ]] || die "Usage: visual-qa-desktop tab-transfer \"source tab\" \"target tab\""
     local src_name="$1" tgt_name="$2"
     local pane_json pane_id
     pane_json=$(_unique_pane_json "$tgt_name")
@@ -2324,7 +2324,7 @@ cmd_stop() {
 
 _usage() {
     cat <<'EOF'
-Usage: visual-qa [--target NAME] <command> [args...]
+Usage: visual-qa-desktop [--target NAME] <command> [args...]
 
 Session:
   setup                              Check/install dependencies

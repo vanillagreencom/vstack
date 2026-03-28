@@ -1,0 +1,41 @@
+# Copy this file to `visual-qa.conf` in your project root and fill in the
+# values for your application. The visual-qa-desktop scripts source that project-root
+# file from the repo under test.
+#
+# Required core settings
+VQA_APP_BINARY="$ROOT_DIR/target/debug/my-app"
+VQA_BUILD_CMD="cargo build -p my-app --features visual-qa"
+VQA_WINDOW_TITLE="My App"
+VQA_SCREENSHOT_ENV_KEY="MY_APP_SCREENSHOT_DIR"
+
+# Optional layout/map integration
+VQA_LAYOUT_ENV_KEY="MY_APP_LAYOUT_FIXTURE"
+VQA_MAP_ENV_KEY="MY_APP_MAP_PATH"
+VQA_DEFAULT_LAYOUT_ENV="MY_APP_DEFAULT_LAYOUT=1"
+
+# Optional explicit capability overrides
+VQA_TARGET_NAME="app"
+VQA_SUPPORTS_LAYOUT="true"
+VQA_SUPPORTS_MAP="true"
+VQA_SUPPORTS_BASELINE="true"
+VQA_AUTO_WATCH="true"
+
+# Optional baseline configuration
+VQA_BASELINE_FIXTURES_DIR="$ROOT_DIR/testdata/golden/layouts"
+VQA_BASELINE_GOLDEN_DIR="$ROOT_DIR/testdata/golden/screenshots/linux"
+VQA_BASELINE_FIXTURE_GLOB="*.ron"
+
+# Multi-target example:
+# if [[ "${VQA_TARGET:-}" == "viewer" ]]; then
+#     VQA_TARGET_NAME="viewer"
+#     VQA_APP_BINARY="$ROOT_DIR/target/debug/my-viewer"
+#     VQA_BUILD_CMD="cargo build -p my-viewer"
+#     VQA_WINDOW_TITLE="Component Viewer"
+#     VQA_SCREENSHOT_ENV_KEY="MY_VIEWER_SCREENSHOT_DIR"
+#     VQA_LAYOUT_ENV_KEY=""
+#     VQA_MAP_ENV_KEY=""
+#     VQA_DEFAULT_LAYOUT_ENV=""
+#     VQA_SUPPORTS_LAYOUT="false"
+#     VQA_SUPPORTS_MAP="false"
+#     VQA_SUPPORTS_BASELINE="false"
+# fi

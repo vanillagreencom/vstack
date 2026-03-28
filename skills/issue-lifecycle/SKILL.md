@@ -5,7 +5,7 @@ license: MIT
 user-invocable: true
 dependencies:
   required: [orchestration]
-  optional: [linear, decider, benchmarking, visual-qa]
+  optional: [linear, decider, benchmarking, visual-qa-desktop]
 metadata:
   author: vanillagreen
   version: "1.2.0"

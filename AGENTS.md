@@ -61,7 +61,7 @@ license: MIT
 user-invocable: true
 dependencies:
   required: [linear, github, worktree]
-  optional: [visual-qa]
+  optional: [visual-qa-desktop]
 ```
 
 ### Hook header (`hooks/*.sh`)
@@ -79,7 +79,7 @@ dependencies:
 ### Mapping config (`vstack.toml`)
 ```toml
 [agent-skills]
-iced = ["iced-rs", "trading-design", "visual-qa", "price-handling"]
+iced = ["iced-rs", "trading-design", "visual-qa-desktop", "price-handling"]
 
 [role-skills]
 engineer = ["issue-lifecycle", "github", "worktree"]
