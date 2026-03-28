@@ -44,7 +44,9 @@ fi
 ## 1. Identify Changes
 
 ```bash
-git -C [WORKTREE_PATH] diff main...HEAD --stat
+BASE_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git -C [WORKTREE_PATH] symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}
+[ -n "$BASE_BRANCH" ] || BASE_BRANCH=main
+git -C [WORKTREE_PATH] diff "origin/$BASE_BRANCH"...HEAD --stat
 ```
 
 **If no changes**: Report "No changes to review" and **END**.

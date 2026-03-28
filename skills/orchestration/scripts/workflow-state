@@ -4,6 +4,13 @@
 
 set -euo pipefail
 
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+ENV_FILE="$PROJECT_ROOT/.env.local"
+if [[ -f "$ENV_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$ENV_FILE"
+fi
+
 STATE_DIR="${ORCH_STATE_DIR:-tmp}"
 STATE_PREFIX="workflow-state"
 

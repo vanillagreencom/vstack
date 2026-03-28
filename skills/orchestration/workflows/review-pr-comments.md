@@ -42,13 +42,13 @@ On any `gh` or `$GIT_HOST_CLI` command failure: halt, report error, ask user: `R
 
 ### 1.1 Wait for All Bot Reviews
 
-Multiple bots may review (e.g., claude bot reviews fast, codex reviews arrive minutes later). Wait for all configured reviewers before triaging.
+Multiple bots may review on different timelines. Wait for all configured reviewers before triaging.
 
 ```bash
 WAIT_RESULT=$(scripts/bot-review-wait [PR_NUMBER] 15 600 --json --reviewers "$BOT_REVIEWERS")
 ```
 
-`$BOT_REVIEWERS` is a comma-separated list of bot usernames to wait for (e.g., `claude[bot],chatgpt-codex-connector[bot]`). Default: wait for any bot with a sticky/review comment.
+`$BOT_REVIEWERS` is a comma-separated list of bot usernames to wait for (e.g., `review-bot-a[bot],review-bot-b[bot]`). Default: wait for any bot with a sticky/review comment.
 
 **Polling behavior**: For each reviewer, wait until either a terminal verdict arrives or timeout. Proceed when all have reported or timeout is reached — late arrivals are caught in § 6.3.
 
@@ -73,7 +73,7 @@ Output contains: `threads` (inline) + `comments` (PR-level).
 2. **Filter comments**. When `$SUMMARY_TS` is set, filter PR-level comments with `select(.created_at > $SUMMARY_TS)`.
 
    **Exclude (both sources):**
-   - Noise bots: `dependabot[bot]`, `github-actions[bot]`, `renovate[bot]`, `linear`
+   - Noise bots: `dependabot[bot]`, `github-actions[bot]`, `renovate[bot]`, issue-tracker sync bots
    - **If re-run** (`SUMMARY_TS` set): Comments posted before `SUMMARY_TS`
 
    **Exclude (review threads only):**
@@ -88,7 +88,8 @@ Output contains: `threads` (inline) + `comments` (PR-level).
 3. **Collect bot review comments** — from ALL review bots (not just one):
    ```bash
    # Get sticky/summary comments from each bot reviewer
-   for BOT in $BOT_REVIEWERS; do
+   IFS=',' read -ra REVIEW_BOTS <<< "$BOT_REVIEWERS"
+   for BOT in "${REVIEW_BOTS[@]}"; do
      $GIT_HOST_CLI find-comment [PR_NUMBER] --author "$BOT" --review-summary
    done
    ```

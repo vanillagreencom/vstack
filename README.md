@@ -77,6 +77,14 @@ vstack check
 vstack remove rust-safety
 ```
 
+## Project-Local Config
+
+Projects can keep local package configuration in `.env.local`. Copy [.env.local.example](./.env.local.example) to `.env.local`, then fill only the variables your project uses.
+
+- Use `.env.local` for project-level workflow config such as worktree behavior, issue-tracker tokens, bot auth, and optional orchestration helpers like `VISUAL_QA_TARGET_CMD`.
+- Keep tool-specific Visual QA runtime config in `visual-qa.conf`. The `VISUAL_QA_*` variables in `.env.local` are only workflow helpers for target selection, smoke tests, visual batteries, and baseline routing.
+- The `worktree` skill symlinks `.env.local` into created worktrees so those settings stay available in delegated sessions.
+
 ## How It Works
 
 ### Mental Model

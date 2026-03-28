@@ -58,7 +58,7 @@ run_checks() {
         : # ok
     elif [ "$mergeable" = "CONFLICTING" ]; then
         can_merge=false
-        issues+=("conflicts: PR has merge conflicts. Resolve with: git fetch origin && git rebase origin/main")
+        issues+=("conflicts: PR has merge conflicts. Resolve by rebasing onto your default branch and force-pushing")
     else
         can_merge=false
         issues+=("unknown: GitHub still computing mergeable status, retry in a few seconds")

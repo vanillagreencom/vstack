@@ -3,7 +3,7 @@
 # visual-qa - Automated visual QA in isolated virtual display
 #
 # Launches app inside Xvfb (Linux) so the user's real display is untouched.
-# Provides primitives for Claude to drive interactions and capture screenshots.
+# Provides primitives for automation agents to drive interactions and capture screenshots.
 #
 # Location: scripts/visual-qa
 #
@@ -16,27 +16,29 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)"
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 SESSION_FILE="${VISUAL_QA_SESSION:-/tmp/visual-qa-session.json}"
 
-# Parse --target flag before config sourcing (so config can branch on VQA_TARGET)
-for _arg in "$@"; do
-    if [[ "$_arg" == --target=* ]]; then
-        export VQA_TARGET="${_arg#--target=}"
-    fi
-done
-# Also support: visual-qa --target NAME <command>
 _vqa_rewritten_args=()
-_skip_next=false
-for _arg in "$@"; do
-    if $_skip_next; then _skip_next=false; continue; fi
-    if [[ "$_arg" == "--target" ]]; then
-        export VQA_TARGET="${2:-}"
-        _skip_next=true
-        continue
-    fi
-    [[ "$_arg" == --target=* ]] && continue
-    _vqa_rewritten_args+=("$_arg")
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target=*)
+            export VQA_TARGET="${1#--target=}"
+            shift
+            ;;
+        --target)
+            [[ $# -ge 2 ]] || {
+                echo "ERROR: Usage: visual-qa [--target NAME] <command> [args...]" >&2
+                exit 1
+            }
+            export VQA_TARGET="$2"
+            shift 2
+            ;;
+        *)
+            _vqa_rewritten_args+=("$1")
+            shift
+            ;;
+    esac
 done
 if [[ ${#_vqa_rewritten_args[@]} -gt 0 ]]; then
     set -- "${_vqa_rewritten_args[@]}"
@@ -64,9 +66,38 @@ _vqa_require VQA_WINDOW_TITLE "window title for detection"
 _vqa_require VQA_SCREENSHOT_ENV_KEY "env var name the app reads for screenshot output dir"
 
 # Optional config — features that not all apps support
+VQA_TARGET_NAME="${VQA_TARGET_NAME:-${VQA_TARGET:-default}}"
 VQA_LAYOUT_ENV_KEY="${VQA_LAYOUT_ENV_KEY:-}"
 VQA_MAP_ENV_KEY="${VQA_MAP_ENV_KEY:-}"
 VQA_DEFAULT_LAYOUT_ENV="${VQA_DEFAULT_LAYOUT_ENV:-}"
+VQA_SUPPORTS_LAYOUT="${VQA_SUPPORTS_LAYOUT:-}"
+VQA_SUPPORTS_MAP="${VQA_SUPPORTS_MAP:-}"
+VQA_SUPPORTS_BASELINE="${VQA_SUPPORTS_BASELINE:-}"
+VQA_BASELINE_FIXTURES_DIR="${VQA_BASELINE_FIXTURES_DIR:-$ROOT_DIR/testdata/golden/layouts}"
+VQA_BASELINE_GOLDEN_DIR="${VQA_BASELINE_GOLDEN_DIR:-}"
+VQA_BASELINE_FIXTURE_GLOB="${VQA_BASELINE_FIXTURE_GLOB:-*.ron}"
+VQA_AUTO_WATCH="${VQA_AUTO_WATCH:-true}"
+if [[ -z "$VQA_SUPPORTS_LAYOUT" ]]; then
+    if [[ -n "$VQA_LAYOUT_ENV_KEY" ]]; then
+        VQA_SUPPORTS_LAYOUT="true"
+    else
+        VQA_SUPPORTS_LAYOUT="false"
+    fi
+fi
+if [[ -z "$VQA_SUPPORTS_MAP" ]]; then
+    if [[ -n "$VQA_MAP_ENV_KEY" ]]; then
+        VQA_SUPPORTS_MAP="true"
+    else
+        VQA_SUPPORTS_MAP="false"
+    fi
+fi
+if [[ -z "$VQA_SUPPORTS_BASELINE" ]]; then
+    if [[ "$VQA_SUPPORTS_LAYOUT" == "true" ]]; then
+        VQA_SUPPORTS_BASELINE="true"
+    else
+        VQA_SUPPORTS_BASELINE="false"
+    fi
+fi
 # Screenshots go to testdata/screenshots/<run-id>/ (gitignored).
 # Resolved lazily: session commands read from the session file; cmd_start generates fresh.
 SCREENSHOT_DIR=""
@@ -97,12 +128,44 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "INFO: $*" >&2; }
 warn() { echo "WARN: $*" >&2; }
 
+build_target() {
+    (cd "$ROOT_DIR" && bash -lc "$VQA_BUILD_CMD")
+}
+
+_append_env_assignment() {
+    local array_name="$1" key="$2" value="$3"
+    [[ -n "$key" ]] || return 0
+    eval "$array_name+=(\"\${key}=\${value}\")"
+}
+
+_append_env_words() {
+    local array_name="$1" words="$2"
+    [[ -n "$words" ]] || return 0
+    local parsed=()
+    read -r -a parsed <<< "$words"
+    if [[ ${#parsed[@]} -gt 0 ]]; then
+        eval "$array_name+=(\"\${parsed[@]}\")"
+    fi
+}
+
+_require_layout_support() {
+    [[ "$VQA_SUPPORTS_LAYOUT" == "true" ]] || die "VQA_TARGET=${VQA_TARGET_NAME} does not support layout fixtures"
+}
+
+_require_map_support() {
+    [[ "$VQA_SUPPORTS_MAP" == "true" ]] || die "VQA_TARGET=${VQA_TARGET_NAME} does not support live map commands"
+}
+
+_require_baseline_support() {
+    [[ "$VQA_SUPPORTS_BASELINE" == "true" ]] || die "VQA_TARGET=${VQA_TARGET_NAME} does not support baseline capture/check"
+}
+
 # Cache session values to avoid re-parsing JSON on every command.
 # Cleared on start/stop; populated on first session_get call.
 _SESSION_CACHE=""
 
 session_get() {
-    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: tools/visual-qa start"
+    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: visual-qa start"
     if [[ -z "$_SESSION_CACHE" ]]; then
         _SESSION_CACHE=$(cat "$SESSION_FILE")
     fi
@@ -114,7 +177,7 @@ session_display() {
 }
 
 require_session() {
-    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: tools/visual-qa start"
+    [[ -f "$SESSION_FILE" ]] || die "No active session. Run: visual-qa start"
     if [[ -z "$_SESSION_CACHE" ]]; then
         _SESSION_CACHE=$(cat "$SESSION_FILE")
     fi
@@ -135,6 +198,7 @@ _wait_for_file() {
 }
 
 _map_path() {
+    _require_map_support
     local path
     path=$(session_get map_path)
     [[ -n "$path" ]] || die "No live visual-qa map configured for this session"
@@ -295,6 +359,23 @@ find_free_display() {
     die "No free display number found (checked :90-:199)"
 }
 
+detect_install_command() {
+    local packages="$1"
+    if command -v pacman >/dev/null 2>&1; then
+        echo "sudo pacman -S $packages"
+    elif command -v apt-get >/dev/null 2>&1; then
+        echo "sudo apt-get install $packages"
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "sudo dnf install $packages"
+    elif command -v zypper >/dev/null 2>&1; then
+        echo "sudo zypper install $packages"
+    elif command -v apk >/dev/null 2>&1; then
+        echo "sudo apk add $packages"
+    else
+        echo "<install with your system package manager>"
+    fi
+}
+
 # --- Commands ---
 
 cmd_setup() {
@@ -351,7 +432,7 @@ cmd_setup() {
                 echo "Missing: ${missing[*]}"
                 echo ""
                 echo "Install with:"
-                echo "  sudo pacman -S ${install_pkgs[*]}"
+                echo "  $(detect_install_command "${install_pkgs[*]}")"
                 return 1
             fi
 
@@ -409,6 +490,9 @@ cmd_start() {
     if [[ -n "$layout" ]] && [[ ! -f "$layout" ]]; then
         die "Layout fixture not found: $layout"
     fi
+    if [[ -n "$layout" ]]; then
+        _require_layout_support
+    fi
 
     # Cleanup any stale session
     if [[ -f "$SESSION_FILE" ]]; then
@@ -455,7 +539,10 @@ _start_linux() {
     mkdir -p "$session_log_dir"
     local xvfb_log="$session_log_dir/xvfb.log"
     local app_log="$session_log_dir/app.log"
-    local map_path="$SCREENSHOT_DIR/live-map.json"
+    local map_path=""
+    if [[ "$VQA_SUPPORTS_MAP" == "true" ]]; then
+        map_path="$SCREENSHOT_DIR/live-map.json"
+    fi
 
     # Start Xvfb — trap ensures cleanup on interrupt
     trap 'cmd_stop 2>/dev/null; exit 130' INT TERM
@@ -472,8 +559,8 @@ _start_linux() {
     # Build if requested
     local binary="$VQA_APP_BINARY"
     if [[ "$build" == "true" ]]; then
-        info "Building app..."
-        if ! $VQA_BUILD_CMD 2>&1; then
+        info "Building ${VQA_TARGET_NAME}..."
+        if ! build_target 2>&1; then
             kill "$xvfb_pid" 2>/dev/null
             die "Build failed"
         fi
@@ -489,25 +576,21 @@ _start_linux() {
     # real Wayland compositor. WGPU_BACKEND=vulkan uses lavapipe (Mesa software Vulkan).
     # WINIT_X11_SCALE_FACTOR tells winit/Iced the HiDPI scale for proper rendering.
     info "Launching app in virtual display..."
+    local launch_env=(
+        -u WAYLAND_DISPLAY
+        -u XDG_SESSION_TYPE
+        "DISPLAY=:$display"
+        "WINIT_UNIX_BACKEND=x11"
+        "WINIT_X11_SCALE_FACTOR=$scale"
+        "WGPU_BACKEND=${WGPU_BACKEND:-vulkan}"
+    )
     if [[ -n "$layout" ]]; then
-        nohup setsid env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE \
-            DISPLAY=":$display" \
-            WINIT_UNIX_BACKEND=x11 \
-            WINIT_X11_SCALE_FACTOR="$scale" \
-            ${VQA_LAYOUT_ENV_KEY}="$layout" \
-            ${VQA_MAP_ENV_KEY}="$map_path" \
-            WGPU_BACKEND="${WGPU_BACKEND:-vulkan}" \
-            "$binary" >"$app_log" 2>&1 < /dev/null &
+        _append_env_assignment launch_env "$VQA_LAYOUT_ENV_KEY" "$layout"
     else
-        nohup setsid env -u WAYLAND_DISPLAY -u XDG_SESSION_TYPE \
-            DISPLAY=":$display" \
-            WINIT_UNIX_BACKEND=x11 \
-            WINIT_X11_SCALE_FACTOR="$scale" \
-            ${VQA_DEFAULT_LAYOUT_ENV} \
-            ${VQA_MAP_ENV_KEY}="$map_path" \
-            WGPU_BACKEND="${WGPU_BACKEND:-vulkan}" \
-            "$binary" >"$app_log" 2>&1 < /dev/null &
+        _append_env_words launch_env "$VQA_DEFAULT_LAYOUT_ENV"
     fi
+    _append_env_assignment launch_env "$VQA_MAP_ENV_KEY" "$map_path"
+    nohup setsid env "${launch_env[@]}" "$binary" >"$app_log" 2>&1 < /dev/null &
     local app_pid=$!
     sleep 2
 
@@ -554,8 +637,12 @@ _start_linux() {
     "scale": $scale,
     "platform": "linux",
     "mode": "xvfb-isolated",
+    "target": "$VQA_TARGET_NAME",
     "layout_fixture": "$layout",
     "map_path": "$map_path",
+    "supports_layout": $([[ "$VQA_SUPPORTS_LAYOUT" == "true" ]] && echo true || echo false),
+    "supports_map": $([[ "$VQA_SUPPORTS_MAP" == "true" ]] && echo true || echo false),
+    "supports_baseline": $([[ "$VQA_SUPPORTS_BASELINE" == "true" ]] && echo true || echo false),
     "screenshot_dir": "$SCREENSHOT_DIR",
     "screenshot_count": 0
 }
@@ -568,7 +655,9 @@ EOF
     info "Pre-warming OCR cache..."
     _get_ocr_tsv > /dev/null 2>&1 || true
 
-    cmd_watch
+    if [[ "$VQA_AUTO_WATCH" == "true" ]]; then
+        cmd_watch
+    fi
 }
 
 _start_mac() {
@@ -580,10 +669,13 @@ _start_mac() {
     warn "macOS mode: will use your real mouse/keyboard"
 
     local binary="$VQA_APP_BINARY"
-    local map_path="$SCREENSHOT_DIR/live-map.json"
+    local map_path=""
+    if [[ "$VQA_SUPPORTS_MAP" == "true" ]]; then
+        map_path="$SCREENSHOT_DIR/live-map.json"
+    fi
     if [[ "$build" == "true" ]]; then
-        info "Building app..."
-        if ! $VQA_BUILD_CMD 2>&1; then
+        info "Building ${VQA_TARGET_NAME}..."
+        if ! build_target 2>&1; then
             die "Build failed"
         fi
     fi
@@ -592,11 +684,14 @@ _start_mac() {
         die "Binary not found: $binary (use --build to compile)"
     fi
 
+    local launch_env=()
     if [[ -n "$layout" ]]; then
-        ${VQA_LAYOUT_ENV_KEY}="$layout" ${VQA_MAP_ENV_KEY}="$map_path" "$binary" &
+        _append_env_assignment launch_env "$VQA_LAYOUT_ENV_KEY" "$layout"
     else
-        ${VQA_DEFAULT_LAYOUT_ENV} ${VQA_MAP_ENV_KEY}="$map_path" "$binary" &
+        _append_env_words launch_env "$VQA_DEFAULT_LAYOUT_ENV"
     fi
+    _append_env_assignment launch_env "$VQA_MAP_ENV_KEY" "$map_path"
+    env "${launch_env[@]}" "$binary" &
     local app_pid=$!
     sleep 3
 
@@ -621,8 +716,12 @@ _start_mac() {
     "scale": $scale,
     "platform": "darwin",
     "mode": "direct",
+    "target": "$VQA_TARGET_NAME",
     "layout_fixture": "$layout",
     "map_path": "$map_path",
+    "supports_layout": $([[ "$VQA_SUPPORTS_LAYOUT" == "true" ]] && echo true || echo false),
+    "supports_map": $([[ "$VQA_SUPPORTS_MAP" == "true" ]] && echo true || echo false),
+    "supports_baseline": $([[ "$VQA_SUPPORTS_BASELINE" == "true" ]] && echo true || echo false),
     "screenshot_dir": "$SCREENSHOT_DIR",
     "screenshot_count": 0
 }
@@ -1010,6 +1109,11 @@ cmd_status() {
                 recording_alive: $recording_alive,
                 display_reachable: $display_reachable
             },
+            capabilities: {
+                layout: (.supports_layout // false),
+                map: (.supports_map // false),
+                baseline: (.supports_baseline // false)
+            },
             map: {
                 path: $map_path,
                 ready: $map_ready,
@@ -1083,11 +1187,7 @@ cmd_record() {
                     info "Recording to $output (PID $ffmpeg_pid)"
                     ;;
                 darwin)
-                    screencapture -v "$output" &
-                    local sc_pid=$!
-                    jq ".ffmpeg_pid = $sc_pid | .recording_path = \"$output\"" \
-                        "$SESSION_FILE" > "$SESSION_FILE.tmp" && mv "$SESSION_FILE.tmp" "$SESSION_FILE"
-                    info "Recording to $output (PID $sc_pid)"
+                    die "Video recording is not implemented for macOS yet"
                     ;;
             esac
             ;;
@@ -1151,6 +1251,10 @@ cmd_watch() {
             session_log_dir="$(session_get screenshot_dir)/session-logs"
             mkdir -p "$session_log_dir"
             viewer_log="$session_log_dir/viewer.log"
+            if ! command -v ffplay >/dev/null 2>&1; then
+                warn "ffplay not found; skipping live viewer"
+                return 0
+            fi
             # ffplay shows the Xvfb framebuffer on the real display.
             # The user sees everything but their mouse only affects the ffplay window (view-only).
             nohup setsid ffplay -f x11grab -video_size "${win_w}x${win_h}" \
@@ -1181,7 +1285,7 @@ cmd_baseline() {
 _binary_has_dev_screenshot_support() {
     local binary="$1"
     [[ -f "$binary" ]] || return 1
-    LC_ALL=C grep -aq '${VQA_SCREENSHOT_ENV_KEY}' "$binary" 2>/dev/null
+    LC_ALL=C grep -aq "$VQA_SCREENSHOT_ENV_KEY" "$binary" 2>/dev/null
 }
 
 _detect_platform() {
@@ -1195,10 +1299,14 @@ _detect_platform() {
 
 _baseline_run() {
     local do_compare="$1"; shift
-    local fixtures_dir="$ROOT_DIR/testdata/golden/layouts"
+    _require_baseline_support
+    local fixtures_dir="$VQA_BASELINE_FIXTURES_DIR"
     local platform
     platform=$(_detect_platform)
-    local golden_dir="$ROOT_DIR/testdata/golden/screenshots/$platform"
+    local golden_dir="$VQA_BASELINE_GOLDEN_DIR"
+    if [[ -z "$golden_dir" ]]; then
+        golden_dir="$ROOT_DIR/testdata/golden/screenshots/$platform"
+    fi
     local output_dir=""
     local scenarios="all"
     local build=true
@@ -1222,10 +1330,12 @@ _baseline_run() {
     fi
     mkdir -p "$output_dir"
 
+    [[ -d "$fixtures_dir" ]] || die "Baseline fixtures directory not found: $fixtures_dir"
+
     # Build once
     if [[ "$build" == "true" ]]; then
-        info "Building app..."
-        if ! $VQA_BUILD_CMD 2>&1; then
+        info "Building ${VQA_TARGET_NAME}..."
+        if ! build_target 2>&1; then
             die "Build failed"
         fi
     fi
@@ -1233,13 +1343,16 @@ _baseline_run() {
     # Resolve scenarios
     local fixture_files=()
     if [[ "$scenarios" == "all" ]]; then
-        for f in "$fixtures_dir"/*.ron; do
+        for f in "$fixtures_dir"/$VQA_BASELINE_FIXTURE_GLOB; do
             [[ -f "$f" ]] && fixture_files+=("$f")
         done
     else
         IFS=',' read -ra names <<< "$scenarios"
         for name in "${names[@]}"; do
-            local f="$fixtures_dir/${name}.ron"
+            local f="$fixtures_dir/${name}"
+            if [[ ! -f "$f" ]] && [[ "$name" != *.* ]] && [[ "$VQA_BASELINE_FIXTURE_GLOB" == \** ]]; then
+                f="$fixtures_dir/${name}${VQA_BASELINE_FIXTURE_GLOB#\*}"
+            fi
             [[ -f "$f" ]] || die "Fixture not found: $f"
             fixture_files+=("$f")
         done
@@ -1268,7 +1381,7 @@ _baseline_run() {
         local binary="$VQA_APP_BINARY"
         if [[ -x "$binary" ]] && ! _binary_has_dev_screenshot_support "$binary"; then
             local preflight_log="$diagnostics_dir/preflight.log"
-            local preflight_error="Binary $binary does not include the dev-only screenshot path required for baseline capture."
+            local preflight_error="Binary $binary does not include the screenshot path required for baseline capture."
             local preflight_hint="Rebuild with: $VQA_BUILD_CMD, or rerun baseline capture without --no-build."
 
             cat > "$preflight_log" <<EOF
@@ -1284,7 +1397,8 @@ EOF
 
             for f in "${fixture_files[@]}"; do
                 local name
-                name=$(basename "$f" .ron)
+                name=$(basename "$f")
+                name="${name%.*}"
                 echo "  $name: FAILED (build/bootstrap)"
                 results+=("$(jq -nc \
                     --arg scenario "$name" \
@@ -1306,7 +1420,8 @@ EOF
     if [[ $failed -eq 0 ]]; then
         for f in "${fixture_files[@]}"; do
             local name
-            name=$(basename "$f" .ron)
+            name=$(basename "$f")
+            name="${name%.*}"
             local screenshot capture_output scenario_log stage error hint
             scenario_log="$diagnostics_dir/${name}.capture.log"
 
@@ -2209,7 +2324,7 @@ cmd_stop() {
 
 _usage() {
     cat <<'EOF'
-Usage: visual-qa <command> [args...]
+Usage: visual-qa [--target NAME] <command> [args...]
 
 Session:
   setup                              Check/install dependencies

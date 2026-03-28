@@ -122,7 +122,12 @@ Always create as a parent + sub-issue pair. Parent coordinates, child implements
 
 2. **If uncommitted** → Ask user: `Stash` | `Commit` | `Continue anyway`
 
-3. **If unpushed** → Ask user: `Push unpushed commits to main?` (show commits) → `git push origin main`
+3. **If unpushed** → Ask user: `Push unpushed commits to the default branch?` (show commits), then:
+   ```bash
+   DEFAULT_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}
+   [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH=main
+   git push origin "$DEFAULT_BRANCH"
+   ```
 
 4. **Create worktree**: `WT_PATH=$($WORKTREE_CLI create [ISSUE_ID])`
 

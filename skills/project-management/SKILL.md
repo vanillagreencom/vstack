@@ -4,11 +4,10 @@ description: TPM analysis workflows for roadmap planning, cycle planning, priori
 license: MIT
 user-invocable: true
 dependencies:
-  required: [linear]
-  optional: [decider]
+  optional: [linear, decider]
 metadata:
   author: vanillagreen
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Project Management

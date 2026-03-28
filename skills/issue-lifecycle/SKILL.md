@@ -4,11 +4,11 @@ description: Agent workflows for issue implementation, review fix delegation, pr
 license: MIT
 user-invocable: true
 dependencies:
-  required: [linear, orchestration, decider]
-  optional: [benchmarking, visual-qa]
+  required: [orchestration]
+  optional: [linear, decider, benchmarking, visual-qa]
 metadata:
   author: vanillagreen
-  version: "1.0.0"
+  version: "1.2.0"
 ---
 
 # Issue Lifecycle

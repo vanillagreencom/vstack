@@ -23,6 +23,11 @@ _git_common_dir=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null 
 if [[ "$_git_common_dir" != ".git" && -n "$_git_common_dir" ]]; then
   PROJECT_ROOT="$(dirname "$_git_common_dir")"
 fi
+ENV_FILE="$PROJECT_ROOT/.env.local"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+fi
 
 CACHE_DIR="${ORCH_CACHE_DIR:-$PROJECT_ROOT/.cache/orchestration}"
 GROUPS_FILE="$CACHE_DIR/parallel-groups.json"

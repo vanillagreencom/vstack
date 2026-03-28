@@ -45,9 +45,11 @@ The workflow for QA agents (safety, perf-qa, arch-review) triggered via `needs-*
 | Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
 | Decider skill | Decision templates, search CLI, creation workflows | `$DECISIONS_CMD` |
 | Benchmarking skill (optional) | Baseline capture, regression classification, recording | `$BENCH_CLI`, `$BENCH_PARSER` |
-| Visual QA skill (optional) | Screenshot capture, interactive testing | `$VISUAL_QA_CLI`, `$SCREENSHOT_CLI` |
+| Visual QA skill (optional) | Screenshot capture, interactive testing, target routing | `$VISUAL_QA_CLI`, `$SCREENSHOT_CLI`, `$VISUAL_QA_TARGET_CMD` |
 
 ## Configuration
+
+Set these in `.env.local` or export them in the shell that runs the workflow. `.env.local.example` in the repo root shows a minimal pattern.
 
 ### Project-level variables
 
@@ -61,6 +63,10 @@ The workflow for QA agents (safety, perf-qa, arch-review) triggered via `needs-*
 | `$BENCH_PARSER` | Benchmark output parser | Optional |
 | `$VISUAL_QA_CLI` | Visual QA CLI command | Optional |
 | `$SCREENSHOT_CLI` | Screenshot capture CLI command | Optional |
+| `$VISUAL_QA_TARGET_CMD` | Optional project helper to select a visual-QA target and companion validation commands | Optional |
+| `$VISUAL_QA_FIXTURE` | Representative layout fixture path for map-capable targets | Optional |
+| `$VISUAL_QA_SMOKE_CMD` | Runtime smoke-test command for screenshot/OCR-only targets | Optional |
+| `$VISUAL_QA_BATTERY_CMD` | Broad visual regression battery command | Optional |
 
 ### Agent types
 

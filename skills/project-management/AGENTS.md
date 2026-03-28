@@ -1,6 +1,6 @@
 # Project Management — Full Compiled Document
 
-**Version 1.0.0**
+**Version 1.1.0**
 vanillagreen
 
 > **Note:**

@@ -1,6 +1,6 @@
 # Orchestration
 
-**Version 1.0.0**
+**Version 1.1.0**
 vanillagreen
 
 > **Note:**
@@ -399,7 +399,7 @@ Agent team implementations vary by harness. These are common behaviors to work a
 | Task status changes generate notifications | N trailing notifications after agent goes idle | Agent recognizes completed tasks, goes idle immediately |
 | Idle notifications wake orchestrator on every agent turn boundary | Orchestrator may intervene prematurely | Rule: never intervene while any task is in-progress |
 | Worktree appears clean during agent research/planning phase | Orchestrator misreads quiet-but-active agent as stalled | Rule: check session-level activity (task status changes, session log entries, process liveness) — not worktree state — before declaring stall. 10 min minimum quiet window. |
-| Orchestrator loses team awareness after context compaction | Can't message alive teammates | Re-read team config from disk, re-send delegation, only respawn if no response |
+| Orchestrator loses teammate awareness after context compaction | Can't message alive teammates | Re-read `workflow-state` child session data and any harness-local agent registry, re-send delegation, only respawn if no response |
 | No session resumption for teammates after restart | Teammates lost on explicit session restart | Respawn + re-delegate pending tasks |
 | Agent teams use more tokens than sub-agents | Higher cost per persistent agent | Consultation pattern uses sub-agents for one-off tasks |
 | Spawn prompt paraphrasing | LLM drops critical instructions when paraphrasing | Copy templates verbatim, fill placeholders only |

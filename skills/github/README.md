@@ -17,7 +17,7 @@ Set in `.env.local` or as environment variables:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `GH_BOT_TOKEN` | Bot account GitHub token | Falls back to `gh` auth |
-| `GH_BOT_USERNAME` | Bot username for filtering | `claude[bot]` |
+| `GH_BOT_USERNAME` | Bot username for filtering | `review-bot[bot]` |
 | `GH_ISSUE_PATTERN` | Regex for branch issue extraction | `[A-Z]+-[0-9]+` |
 
 ## Adding a New Command

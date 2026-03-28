@@ -17,7 +17,7 @@ Arguments:
   PR             PR number
 
 Options:
-  --bot          Dismiss reviews from claude[bot] (default: all CHANGES_REQUESTED)
+  --bot          Dismiss reviews from GH_BOT_USERNAME (default: all CHANGES_REQUESTED)
   --user <name>  Dismiss reviews from specific user
   --message <m>  Dismissal reason (default: "Contested with rationale")
   --dry-run      Show what would be dismissed without executing
@@ -25,7 +25,7 @@ Options:
 Output:
 {
   "success": true,
-  "dismissed": [{"review_id": 123, "user": "claude[bot]", "state": "CHANGES_REQUESTED"}],
+  "dismissed": [{"review_id": 123, "user": "review-bot[bot]", "state": "CHANGES_REQUESTED"}],
   "skipped": []
 }
 
@@ -106,7 +106,7 @@ dismiss_reviews() {
 
     # Apply user filter
     if [ "$filter_bot" = "true" ]; then
-        blocking_reviews=$(echo "$blocking_reviews" | jq -c '[.[] | select(.user.login == "claude[bot]")]')
+        blocking_reviews=$(echo "$blocking_reviews" | jq -c --arg bot_user "${GH_BOT_USERNAME:-review-bot[bot]}" '[.[] | select(.user.login == $bot_user)]')
     elif [ -n "$filter_user" ]; then
         blocking_reviews=$(echo "$blocking_reviews" | jq -c --arg user "$filter_user" '[.[] | select(.user.login == $user)]')
     fi

@@ -66,6 +66,8 @@ Multi-agent session coordination — front-to-back issue workflows, delegation p
 
 ## Configuration
 
+Set these in `.env.local` or export them in the shell that runs the workflow. `.env.local.example` in the repo root includes optional Visual QA helpers plus launcher/review settings. The orchestration helper scripts source `.env.local` automatically when present.
+
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `ORCH_STATE_DIR` | Override state file directory | `tmp` |
@@ -73,7 +75,11 @@ Multi-agent session coordination — front-to-back issue workflows, delegation p
 | `$GIT_HOST_CLI` | Git host CLI path | — |
 | `$WORKTREE_CLI` | Worktree CLI path | — |
 | `$VALIDATE_CMD` | Build + test + lint command | — |
+| `$VISUAL_QA_BASELINE_CMD` | Optional helper to route baseline capture to a baseline-capable target | — |
 | `$ISSUE_PATTERN` | Issue ID regex for branch names | — |
+| `$BOT_REVIEWERS` | Comma-separated review bot usernames | — |
+| `$BOT_CHECK_NAME` | Optional CI check name for early review detection | — |
+| `$HARNESS_CMD` | Optional `parallel-launch` command template with `{issue}` placeholder | — |
 
 ## Creating a New Rule
 

@@ -1,6 +1,6 @@
 # Fix Lifecycle
 
-> **Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional)
+> **Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional)
 
 **The workflow for dev agents receiving review fix delegations.**
 
@@ -66,17 +66,27 @@ $VALIDATE_CMD --recheck            # Only re-runs previously failed checks (skip
 
 **Skip if** the issue does not have the `design` label, or the fix does not touch UI code.
 
+Before running commands:
+- If the project defines `$VISUAL_QA_TARGET_CMD`, run it first. Use it to select the correct target for the changed files and to discover any companion validation commands.
+- Otherwise, use the current/default target configured in `visual-qa.conf`.
+
 Run a targeted visual check using the visual QA skill:
 - **Rendering fix**: `$SCREENSHOT_CLI --no-build` → Read the PNG to verify
-- **Interaction / layout fix**:
+- **Map-capable interaction / layout target** (target exposes live map geometry and optional fixtures):
   1. `$VISUAL_QA_CLI doctor`
-  2. Start a visual QA session, preferably with the relevant fixture:
-     `$VISUAL_QA_CLI start --layout [PROJECT_TEST_FIXTURE]`
+  2. Start a visual QA session. If the project exposes a representative fixture path, prefer it:
+     - `$VISUAL_QA_CLI start --layout "$VISUAL_QA_FIXTURE"`
+     - Otherwise: `$VISUAL_QA_CLI start`
   3. `$VISUAL_QA_CLI map`
   4. Use map-first high-level commands to test the affected behavior
   5. Use `locate` only for literal text targets or OCR sanity checks
   6. Capture a screenshot or short recording if it adds evidence
-- **Broader regression risk**: Run the project-specific visual test battery
+- **Screenshot/OCR-only target** (no live map or layout fixture contract):
+  1. `$VISUAL_QA_CLI doctor`
+  2. `$VISUAL_QA_CLI start --build`
+  3. Use `locate`, `click`, `status`, and `screenshot` to test the affected behavior
+  4. Pair this with any project-specific runtime validation command (for example `$VISUAL_QA_SMOKE_CMD`) when available
+- **Broader regression risk**: Run `$VISUAL_QA_BATTERY_CMD` when the project defines one; otherwise note that no dedicated visual battery exists
 
 Focus on what the fix changes — not the full checklist.
 

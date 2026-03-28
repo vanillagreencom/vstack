@@ -8,6 +8,7 @@
 #   GIT_HOST_CLI     - Path to git host CLI script (e.g., github.sh)
 #   BOT_REVIEWERS    - Comma-separated bot usernames (fallback if --reviewers not passed)
 #                      Default: auto-detect from PR reviews
+#   BOT_CHECK_NAME   - Optional CI check name to treat as an early review signal
 #
 # Phases:
 #   1. Poll CI checks AND sticky/review verdicts in parallel (max 60s)
@@ -23,6 +24,13 @@
 #   1 - Timeout (max_wait exceeded, best-known verdicts returned)
 #   2 - Partial timeout (some reviewers terminal, others still pending)
 set -euo pipefail
+
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+ENV_FILE="$PROJECT_ROOT/.env.local"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+fi
 
 # Require GIT_HOST_CLI
 if [[ -z "${GIT_HOST_CLI:-}" ]]; then
@@ -159,11 +167,15 @@ if [ $phase1_end -gt $MAX_WAIT ]; then
   phase1_end=$MAX_WAIT
 fi
 
-# BOT_CHECK_NAME: name of the CI check to monitor (default: "claude")
-BOT_CHECK_NAME="${BOT_CHECK_NAME:-claude}"
+# BOT_CHECK_NAME: optional CI check name to monitor as an early signal.
+# If unset, skip the CI-check heuristic and rely on sticky/review verdicts.
+BOT_CHECK_NAME="${BOT_CHECK_NAME:-}"
 
 while [ $elapsed -lt $phase1_end ]; do
-  check_lines=$(gh pr checks "$PR_NUM" 2>&1 | grep -E "^\s*${BOT_CHECK_NAME}\s" || true)
+  check_lines=""
+  if [[ -n "$BOT_CHECK_NAME" ]]; then
+    check_lines=$(gh pr checks "$PR_NUM" 2>&1 | grep -E "^\s*${BOT_CHECK_NAME}\s" || true)
+  fi
 
   if [ -n "$check_lines" ]; then
     if echo "$check_lines" | grep -qE '\bpass\b'; then

@@ -294,7 +294,12 @@ Worktree creation is idempotent: existing worktrees are reused (rebased onto lat
 
 2. **If uncommitted** → present uncommitted options (stash/commit/push)
 
-3. **If unpushed** → Ask user: `Push unpushed commits to main?` (show commits) → `git push origin main`
+3. **If unpushed** → Ask user: `Push unpushed commits to the default branch?` (show commits), then:
+   ```bash
+   DEFAULT_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}
+   [ -n "$DEFAULT_BRANCH" ] || DEFAULT_BRANCH=main
+   git push origin "$DEFAULT_BRANCH"
+   ```
 
 4. **Active work conflict scan**: Check for agent overlap with in-progress worktrees.
    ```bash

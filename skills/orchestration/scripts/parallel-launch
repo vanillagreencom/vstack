@@ -9,7 +9,7 @@
 #   WORKTREE_CLI   - Path to worktree CLI tool (required)
 #   HARNESS_CMD    - Command template to start agent harness in worktree.
 #                    Use {issue} as placeholder for the issue ID.
-#                    Default: "claude -n {issue} --effort high --permission-mode bypassPermissions '/start {issue}'"
+#                    If unset, opens a shell in the worktree without auto-starting the harness.
 #   ISSUE_PATTERN  - Regex pattern matching issue IDs (default: "[A-Z]+-[0-9]+")
 
 set -euo pipefail
@@ -21,6 +21,11 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 _git_common_dir=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null || echo "")
 if [[ "$_git_common_dir" != ".git" && -n "$_git_common_dir" ]]; then
   PROJECT_ROOT="$(dirname "$_git_common_dir")"
+fi
+ENV_FILE="$PROJECT_ROOT/.env.local"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
 fi
 
 # Configurable issue pattern (default: JIRA-style ABC-123)
@@ -45,7 +50,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Environment:"
       echo "  WORKTREE_CLI   Path to worktree CLI tool (required)"
-      echo "  HARNESS_CMD    Command template with {issue} placeholder"
+      echo "  HARNESS_CMD    Optional command template with {issue} placeholder"
       echo "  ISSUE_PATTERN  Regex for issue IDs (default: [A-Z]+-[0-9]+)"
       exit 0
       ;;
@@ -95,8 +100,8 @@ launch_start_command() {
     # Replace {issue} placeholder with actual issue ID
     echo "${HARNESS_CMD//\{issue\}/$issue}"
   else
-    # Default: Claude Code
-    printf "claude -n %s --effort high --permission-mode bypassPermissions '/start %s'" "$issue" "$issue"
+    # Portable fallback: open a shell in the worktree and let the user start the harness manually.
+    echo ""
   fi
 }
 
@@ -106,6 +111,9 @@ if [[ ${#ISSUES[@]} -lt 2 ]]; then
 fi
 
 echo "Launching ${#ISSUES[@]} parallel worktrees (${TERMINAL_MODE})..."
+if [[ -z "${HARNESS_CMD:-}" ]]; then
+  echo "HARNESS_CMD not set; opening terminals without an auto-start command." >&2
+fi
 
 LAUNCHED=0
 FAILED=()

@@ -36,7 +36,7 @@ All optional. `.env.local` itself is always symlinked into worktrees.
 |----------|---------|
 | `WORKTREE_DEFAULT_BRANCH` | Override default branch detection (fallback: `main`) |
 | `WORKTREE_SYMLINKS` | Space-separated paths to symlink from main (e.g., `.cache benchmarks/results`) |
-| `WORKTREE_COPIES` | Space-separated paths to copy from main (e.g., `.claude/settings.json`) |
+| `WORKTREE_COPIES` | Space-separated paths to copy from main (e.g., `.tooling/settings.json`) |
 | `BOT_NAME` / `BOT_EMAIL` | Git identity for worktree commits |
 | `BOT_SIGNING_KEY` | SSH signing key path |
 | `BOT_REMOTE_NAME` / `BOT_REMOTE_URL` | Remote for bot pushes |

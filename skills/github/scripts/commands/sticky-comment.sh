@@ -60,7 +60,7 @@ if [[ "$PR_NUM" == "--help" || "$PR_NUM" == "-h" ]]; then
     exit 0
 fi
 
-BOT_USER="${GH_BOT_USERNAME:-claude[bot]}"
+BOT_USER="${GH_BOT_USERNAME:-review-bot[bot]}"
 
 if [[ -z "$PR_NUM" ]]; then
   echo '{"error": "Usage: sticky-comment.sh <PR#> [--body|--updated-at|--verdict|--analysis]"}' >&2

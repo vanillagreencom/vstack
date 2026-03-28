@@ -1,6 +1,6 @@
 # Submit PR Workflow
 
-> **Dependencies**: `$GIT_HOST_CLI`, `$WORKTREE_CLI`, `$ISSUE_CLI` (optional), `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `scripts/workflow-state`, `scripts/workflow-sections`, `scripts/bot-review-wait`, `scripts/ci-wait`
+> **Dependencies**: `$GIT_HOST_CLI`, `$WORKTREE_CLI`, `$ISSUE_CLI` (optional), `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_BASELINE_CMD` (optional), `scripts/workflow-state`, `scripts/workflow-sections`, `scripts/bot-review-wait`, `scripts/ci-wait`
 
 Push changes, create/update PR, handle bot review, triage PR comments, and trigger CI.
 
@@ -110,7 +110,7 @@ BOT_STATUS=$(echo "$WAIT_RESULT" | jq -r '.status')
 BOT_VERDICT=$(echo "$WAIT_RESULT" | jq -r '.verdict')
 ```
 
-Waits for all configured bot reviewers (`$BOT_REVIEWERS` — e.g., `claude[bot],chatgpt-codex-connector[bot]`). Auto-detects if not configured. Max wait 600s.
+Waits for all configured bot reviewers (`$BOT_REVIEWERS` — e.g., `review-bot-a[bot],review-bot-b[bot]`). Auto-detects if not configured. Max wait 600s.
 
 **Route result**:
 
@@ -298,10 +298,12 @@ LABELS=$($ISSUE_CLI cache issues get "$ISSUE_ID" --format=compact 2>/dev/null | 
 If `design` label present:
 
 1. **Capture baselines in worktree**:
+   - If the project defines `$VISUAL_QA_BASELINE_CMD`, use it. This command may set a target, run extra preparation, or skip capture for projects whose current visual-QA target does not support baselines.
+   - Otherwise, run the visual-qa skill's baseline capture on the default baseline-capable target.
    ```bash
    (cd [WT_PATH] && visual-qa skill baseline capture)
    ```
-   The visual-qa skill builds the binary and writes baseline artifacts to the worktree's test data directory.
+   The visual-qa skill builds the binary and writes baseline artifacts to the worktree's test data directory. If the project has no baseline-capable target, skip this step and report why.
 
 2. **Commit and push** (without retriggering CI). Baselines are platform-specific:
    ```bash

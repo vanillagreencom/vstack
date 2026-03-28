@@ -342,7 +342,7 @@ load_bot_token() {
 # Returns: "approved", "changes", or "" (no formal review found)
 get_formal_review_verdict() {
     local pr="$1"
-    local bot_user="${GH_BOT_USERNAME:-claude[bot]}"
+    local bot_user="${GH_BOT_USERNAME:-review-bot[bot]}"
     local review_state
     review_state=$(gh api "repos/{owner}/{repo}/pulls/$pr/reviews" \
         --jq "[.[] | select(.user.login == \"$bot_user\")] | last | .state // empty" 2>/dev/null || echo "")

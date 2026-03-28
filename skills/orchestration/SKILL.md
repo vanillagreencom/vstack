@@ -8,7 +8,7 @@ dependencies:
   optional: [visual-qa]
 metadata:
   author: vanillagreen
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Orchestration
@@ -118,7 +118,7 @@ Workflows reference these companion skills. Install and configure per your proje
 | Issue lifecycle skill | Dev implement/fix/review workflows | Referenced in delegation |
 | Project management skill | TPM audit/cycle/roadmap workflows | Referenced in delegation |
 | Decider skill | Decision templates, creation workflows, search CLI | `$DECISIONS_CMD` |
-| Visual QA skill (optional) | Screenshot baselines | Referenced in submit-pr |
+| Visual QA skill (optional) | Screenshot baselines, optional target-specific baseline routing | Referenced in submit-pr |
 
 Project-level configuration:
 
@@ -127,8 +127,11 @@ Project-level configuration:
 | `$VALIDATE_CMD` | Build + test + lint command |
 | `$DIFF_SUMMARY_CMD` | Diff summary with domain grouping (optional) |
 | `$DECISIONS_CMD` | Decision document lookup (optional) |
+| `$VISUAL_QA_BASELINE_CMD` | Optional project helper for baseline-capable target routing | Optional |
 | `$ISSUE_PATTERN` | Regex for issue IDs in branch names |
-| `$BOT_REVIEWERS` | Comma-separated bot usernames to wait for (e.g., `claude[bot],chatgpt-codex-connector[bot]`). Auto-detects if unset. |
+| `$BOT_REVIEWERS` | Comma-separated bot usernames to wait for (e.g., `review-bot-a[bot],review-bot-b[bot]`). Auto-detects if unset. |
+| `$BOT_CHECK_NAME` | Optional CI check name to treat as an early review signal | Optional |
+| `$HARNESS_CMD` | Optional command template used by `parallel-launch` (`{issue}` placeholder) | Optional |
 
 ## Workflows
 

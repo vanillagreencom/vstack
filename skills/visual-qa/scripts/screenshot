@@ -8,8 +8,30 @@
 
 set -uo pipefail
 
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)"
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+_rewritten_args=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target=*)
+            export VQA_TARGET="${1#--target=}"
+            shift
+            ;;
+        --target)
+            [[ $# -ge 2 ]] || fail "Usage: screenshot [--target NAME] [--no-build] [--timeout N] [--layout FILE] [--output DIR]"
+            export VQA_TARGET="$2"
+            shift 2
+            ;;
+        *)
+            _rewritten_args+=("$1")
+            shift
+            ;;
+    esac
+done
+set -- "${_rewritten_args[@]}"
 
 # Load project-specific config if available
 _vqa_conf="${VQA_CONFIG:-${ROOT_DIR}/visual-qa.conf}"
@@ -27,10 +49,21 @@ _require_config VQA_APP_BINARY "path to the application binary"
 _require_config VQA_BUILD_CMD "command to build the application"
 _require_config VQA_SCREENSHOT_ENV_KEY "env var name the app reads for screenshot output dir"
 
+VQA_TARGET_NAME="${VQA_TARGET_NAME:-${VQA_TARGET:-default}}"
 VQA_LAYOUT_ENV_KEY="${VQA_LAYOUT_ENV_KEY:-}"
 VQA_DEFAULT_LAYOUT_ENV="${VQA_DEFAULT_LAYOUT_ENV:-}"
+VQA_SUPPORTS_LAYOUT="${VQA_SUPPORTS_LAYOUT:-}"
+if [[ -z "$VQA_SUPPORTS_LAYOUT" ]]; then
+    if [[ -n "$VQA_LAYOUT_ENV_KEY" ]]; then
+        VQA_SUPPORTS_LAYOUT="true"
+    else
+        VQA_SUPPORTS_LAYOUT="false"
+    fi
+fi
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
+build_target() {
+    (cd "$ROOT_DIR" && bash -lc "$VQA_BUILD_CMD")
+}
 
 binary_has_dev_screenshot_support() {
     local binary="$1"
@@ -102,14 +135,18 @@ while [[ $# -gt 0 ]]; do
         --layout)   LAYOUT="$2"; shift 2 ;;
         --output)   OUTPUT_DIR="$2"; shift 2 ;;
         -h|--help)
-            echo "Usage: tools/screenshot [--no-build] [--timeout N] [--layout FILE] [--output DIR]"
-            echo "  Captures a screenshot of the app."
+            echo "Usage: screenshot [--target NAME] [--no-build] [--timeout N] [--layout FILE] [--output DIR]"
+            echo "  Captures a screenshot of ${VQA_TARGET_NAME}."
             echo "  --no-build expects the binary to already be built."
             exit 0
             ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+if [[ -n "$LAYOUT" && "$VQA_SUPPORTS_LAYOUT" != "true" ]]; then
+    fail "VQA_TARGET=${VQA_TARGET_NAME} does not support --layout"
+fi
 
 # Default output directory: testdata/screenshots/<run-id>/
 if [[ -z "$OUTPUT_DIR" ]]; then
@@ -131,7 +168,7 @@ cd "$ROOT_DIR"
 
 # Build
 if [[ "$BUILD" == "true" ]]; then
-    if ! $VQA_BUILD_CMD 2>&1; then
+    if ! build_target 2>&1; then
         fail "build failed"
     fi
 fi
@@ -142,14 +179,18 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 # Set env vars
-SCREENSHOT_ENV=(${VQA_SCREENSHOT_ENV_KEY}="$OUTPUT_DIR")
-[[ -n "$VQA_DEFAULT_LAYOUT_ENV" ]] && SCREENSHOT_ENV+=($VQA_DEFAULT_LAYOUT_ENV)
+SCREENSHOT_ENV=("${VQA_SCREENSHOT_ENV_KEY}=$OUTPUT_DIR")
+if [[ -n "$VQA_DEFAULT_LAYOUT_ENV" ]]; then
+    DEFAULT_ENV=()
+    read -r -a DEFAULT_ENV <<< "$VQA_DEFAULT_LAYOUT_ENV"
+    SCREENSHOT_ENV+=("${DEFAULT_ENV[@]}")
+fi
 if [[ -n "$LAYOUT" ]]; then
     if [[ ! -f "$LAYOUT" ]]; then
         fail "Layout fixture not found: $LAYOUT"
     fi
     [[ -n "$VQA_LAYOUT_ENV_KEY" ]] || fail "VQA_LAYOUT_ENV_KEY not configured but --layout was passed"
-    SCREENSHOT_ENV+=(${VQA_LAYOUT_ENV_KEY}="$LAYOUT")
+    SCREENSHOT_ENV+=("${VQA_LAYOUT_ENV_KEY}=$LAYOUT")
 fi
 
 # Require a display (macOS always has one)

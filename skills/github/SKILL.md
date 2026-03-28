@@ -66,7 +66,7 @@ scripts/github.sh <command> [options]
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `GH_BOT_TOKEN` | Bot account GitHub token (in `.env.local`) | Falls back to `gh` auth |
-| `GH_BOT_USERNAME` | Bot username for review/comment filtering | `claude[bot]` |
+| `GH_BOT_USERNAME` | Bot username for review/comment filtering | `review-bot[bot]` |
 | `GH_ISSUE_PATTERN` | Regex for issue ID extraction from branches | `[A-Z]+-[0-9]+` |
 
 ## Error Handling

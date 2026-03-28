@@ -5,7 +5,7 @@ license: MIT
 user-invocable: true
 metadata:
   author: vanillagreen
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Visual QA
@@ -24,8 +24,11 @@ Reference these guidelines when:
 ## Entry Points
 
 ```bash
-scripts/screenshot [--no-build] [--timeout N] [--layout FILE]   # Single screenshot
-scripts/visual-qa <command> [args...]                             # Full interactive session
+scripts/screenshot [--target NAME] [--no-build] [--timeout N] [--layout FILE]   # Single screenshot
+scripts/visual-qa [--target NAME] <command> [args...]                            # Full interactive session
+# Compatibility aliases for repos that already call tools/
+tools/screenshot ...
+tools/visual-qa ...
 ```
 
 ## Quick Reference — Pick the Right Tool
@@ -33,6 +36,7 @@ scripts/visual-qa <command> [args...]                             # Full interac
 | User request | What to do |
 |-------------|-----------|
 | "Take a screenshot" | `scripts/screenshot --no-build` → Read the PNG |
+| "Show pane/split map" | `scripts/visual-qa map` if the selected target exposes a live map |
 | "Test if drag/resize works" | Start interactive session (see below) |
 | "Did the UI change?" | `scripts/visual-qa baseline check` |
 | "Capture baselines" | `scripts/visual-qa baseline capture` |
@@ -41,8 +45,10 @@ scripts/visual-qa <command> [args...]                             # Full interac
 ## Interactive Session Lifecycle
 
 1. **Start**: `scripts/visual-qa start [--build] [--layout FILE]`
-2. **Map layout**: `scripts/visual-qa map` + `scripts/visual-qa locate --all`
-3. **Interact + verify**: click/drag/screenshot, re-map after layout changes
+2. **Inspect capabilities**:
+   - If the target supports live map geometry, use `scripts/visual-qa map` + `scripts/visual-qa locate --all`
+   - If the target is screenshot/OCR-only, skip `map` and use `locate`, `status`, `click`, `screenshot`
+3. **Interact + verify**: click/drag/screenshot, re-map after layout changes only when map support exists
 4. **Cleanup**: `scripts/visual-qa stop`
 
 ## Commands
@@ -79,16 +85,35 @@ Requires `visual-qa.conf` in project root. Tools fail with a clear error if requ
 | `VQA_LAYOUT_ENV_KEY` | No | Env var name for layout fixture path |
 | `VQA_MAP_ENV_KEY` | No | Env var name for live map JSON path |
 | `VQA_DEFAULT_LAYOUT_ENV` | No | Default layout env assignment |
+| `VQA_TARGET_NAME` | No | Human-readable target label for logs/errors |
+| `VQA_SUPPORTS_LAYOUT` | No | Force layout capability on/off per target |
+| `VQA_SUPPORTS_MAP` | No | Force live-map capability on/off per target |
+| `VQA_SUPPORTS_BASELINE` | No | Force baseline capability on/off per target |
+| `VQA_AUTO_WATCH` | No | Auto-open the live viewer after `start` on Linux |
+| `VQA_BASELINE_FIXTURES_DIR` | No | Directory of baseline layout fixtures |
+| `VQA_BASELINE_GOLDEN_DIR` | No | Directory of captured baseline PNGs |
+| `VQA_BASELINE_FIXTURE_GLOB` | No | Glob used to discover baseline fixtures |
 
-**Multi-target**: Use `--target NAME` or `VQA_TARGET=NAME` to select a named target. Branch on `VQA_TARGET` in your `visual-qa.conf`. See `README.md` for examples.
+**Multi-target**: Use `--target NAME` or `VQA_TARGET=NAME` to select a named target. Branch on `VQA_TARGET` in your `visual-qa.conf`.
+
+**Capability defaults**:
+- Layout support defaults to `true` when `VQA_LAYOUT_ENV_KEY` is set, otherwise `false`
+- Map support defaults to `true` when `VQA_MAP_ENV_KEY` is set, otherwise `false`
+- Baseline support defaults to layout support, but can be disabled for screenshot-only targets
 
 ## Rules
 
 ### Coordinate Discovery (CRITICAL)
 
 - **Never visually estimate coordinates from screenshots** — always use `locate` or `map`
-- **Re-map after layout changes** — after any click/drag/key, call `map` again before using coordinates
+- **Re-map after layout changes** — after any click/drag/key, call `map` again before using coordinates, but only on targets that expose a live map
 - **Use `--y-range` for tab labels** — tab labels share text with body content; constrain OCR search
+
+### Capability Routing (HIGH)
+
+- **Do not assume every target exposes every command** — screenshot/OCR targets may not support `map`, pane helpers, layout fixtures, or baselines
+- **Branch by target capability, not by hope** — use `VQA_SUPPORTS_LAYOUT`, `VQA_SUPPORTS_MAP`, and `VQA_SUPPORTS_BASELINE`
+- **Prefer project routing helpers when present** — if the project provides a visual-QA target selection command, follow it before running tests
 
 ### Session Discipline (HIGH)
 

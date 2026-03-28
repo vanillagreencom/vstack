@@ -28,7 +28,7 @@ Set these in `.env.local` or as environment variables:
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `GH_BOT_TOKEN` | Bot account GitHub token | Falls back to `gh` auth |
-| `GH_BOT_USERNAME` | Bot username for review/comment filtering | `claude[bot]` |
+| `GH_BOT_USERNAME` | Bot username for review/comment filtering | `review-bot[bot]` |
 | `GH_ISSUE_PATTERN` | Regex for issue ID extraction from branches | `[A-Z]+-[0-9]+` |
 
 Bot token supports direct tokens (`ghp_*`, `gho_*`, `ghs_*`, `ghr_*`, `github_pat_*`) and 1Password references (`op://vault/item/field`).

@@ -180,16 +180,16 @@ query($owner: String!, $repo: String!, $pr: Int!) {
 
     # Apply actionable filter (unresolved non-outdated threads, no bot comments)
     if [ "$actionable" = "true" ] && [ "$FORMAT" != "raw" ]; then
-        output=$(echo "$output" | jq '{
+        output=$(echo "$output" | jq --arg bot_user "${GH_BOT_USERNAME:-review-bot[bot]}" '{
             number,
             title,
             branch,
             files,
             threads: [.threads[] | select(.is_resolved == false and .is_outdated == false) | {
                 id, path, line, source,
-                comments: [.comments[] | select(.author | IN("github-actions", "github-actions[bot]", "dependabot", "dependabot[bot]", "codecov", "codecov[bot]", "claude[bot]") | not)]
+                comments: [.comments[] | select(.author | IN("github-actions", "github-actions[bot]", "dependabot", "dependabot[bot]", "codecov", "codecov[bot]", $bot_user) | not)]
             } | select(.comments | length > 0)],
-            comments: [.comments[] | select(.author | IN("github-actions", "github-actions[bot]", "dependabot", "dependabot[bot]", "codecov", "codecov[bot]") | not)]
+            comments: [.comments[] | select(.author | IN("github-actions", "github-actions[bot]", "dependabot", "dependabot[bot]", "codecov", "codecov[bot]", $bot_user) | not)]
         }')
     fi
 

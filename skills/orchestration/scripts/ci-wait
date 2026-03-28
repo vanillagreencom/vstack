@@ -11,6 +11,13 @@
 #   GIT_HOST_CLI  - (optional) Path to git host CLI script for enriched output
 set -euo pipefail
 
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+ENV_FILE="$PROJECT_ROOT/.env.local"
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+fi
+
 PR_NUM="${1:?Usage: ci-wait <PR#> [poll_interval] [max_wait]}"
 POLL_INTERVAL="${2:-15}"
 MAX_WAIT="${3:-600}"
@@ -21,7 +28,7 @@ case "$merge_state" in
   DIRTY|CONFLICTING)
     echo "PR #$PR_NUM has merge conflicts (state: $merge_state)" >&2
     echo "CI will not trigger until conflicts are resolved." >&2
-    echo "Rebase onto main and force-push to fix." >&2
+    echo "Rebase onto the default branch and force-push to fix." >&2
     exit 1
     ;;
   UNKNOWN)

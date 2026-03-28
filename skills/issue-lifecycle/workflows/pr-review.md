@@ -21,7 +21,9 @@ Extract from delegation message:
 ### 1.1 Diff
 
 ```bash
-git -C [WORKTREE_PATH] diff main...HEAD
+BASE_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git -C [WORKTREE_PATH] symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}
+[ -n "$BASE_BRANCH" ] || BASE_BRANCH=main
+git -C [WORKTREE_PATH] diff "origin/$BASE_BRANCH"...HEAD
 ```
 
 Review for noteworthy findings only — skip minor style issues. Exclude research documents.

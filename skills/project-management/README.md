@@ -41,14 +41,14 @@ This skill requires an issue tracker CLI for all read/write operations. Configur
 
 | Variable | Required | Purpose | Example |
 |----------|----------|---------|---------|
-| `$ISSUE_CLI` | Yes | Path or alias to issue tracker CLI | `linear.sh`, `gh issue`, custom script |
+| `$ISSUE_CLI` | Yes | Path or alias to issue tracker CLI | `issue-tracker-cli`, `gh issue`, custom script |
 | `$VALIDATE_CMD` | No | Build + test + lint command | `make validate`, `npm test` |
 
 ### Example Setup
 
 ```bash
-# In your project's .env or shell config
-export ISSUE_CLI="./scripts/linear.sh"
+# In your project's .env.local or shell config
+export ISSUE_CLI="./scripts/issue-tracker"
 export VALIDATE_CMD="make validate"
 ```
 

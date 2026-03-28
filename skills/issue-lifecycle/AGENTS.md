@@ -1,6 +1,6 @@
 # Issue Lifecycle
 
-**Version 1.0.0**
+**Version 1.1.0**
 vanillagreen
 
 > **Note:**
@@ -34,7 +34,7 @@ Workflows reference these companion skills and tools. Install and configure per 
 | Issue tracker CLI (e.g., `linear` skill) | Issue CRUD, cache, comments, labels | `$ISSUE_CLI` |
 | Orchestration skill | Review-finding schema, recommendation-bias patterns | Referenced by name |
 | Benchmarking skill (optional) | Baseline capture, regression classification, recording | `$BENCH_CLI`, `$BENCH_PARSER` |
-| Visual QA skill (optional) | Screenshot capture, interactive testing | `$VISUAL_QA_CLI`, `$SCREENSHOT_CLI` |
+| Visual QA skill (optional) | Screenshot capture, interactive testing, target routing | `$VISUAL_QA_CLI`, `$SCREENSHOT_CLI`, `$VISUAL_QA_TARGET_CMD` |
 
 Project-level configuration:
 
@@ -43,6 +43,10 @@ Project-level configuration:
 | `$VALIDATE_CMD` | Build + test + lint command |
 | `$DECISIONS_CMD` | Decision document lookup (optional) |
 | `$DIFF_SUMMARY_CMD` | Diff summary with domain grouping (optional) |
+| `$VISUAL_QA_TARGET_CMD` | Optional project helper to select a visual-QA target and companion validation commands |
+| `$VISUAL_QA_FIXTURE` | Representative layout fixture path for map-capable targets |
+| `$VISUAL_QA_SMOKE_CMD` | Runtime smoke-test command for screenshot/OCR-only targets |
+| `$VISUAL_QA_BATTERY_CMD` | Broad visual regression battery command |
 
 ---
 
@@ -50,7 +54,7 @@ Project-level configuration:
 
 **File**: `workflows/dev-implement.md`
 **Agent type**: Dev agents receiving `Issue: [ISSUE_ID]` delegations
-**Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$BENCH_CLI` (optional), orchestration skill
+**Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional), `$BENCH_CLI` (optional), orchestration skill
 
 **The workflow for all dev/QA agents receiving `Issue: [ISSUE_ID]` delegations.**
 
@@ -82,7 +86,9 @@ Respect blocking order: complete blockers before blocked issues.
 - Read/Write/Edit/Grep/Glob: `[WORKTREE_PATH]/...`
 
 ```bash
-git -C [WORKTREE_PATH] fetch origin main
+BASE_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git -C [WORKTREE_PATH] symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}
+[ -n "$BASE_BRANCH" ] || BASE_BRANCH=main
+git -C [WORKTREE_PATH] fetch origin "$BASE_BRANCH"
 ```
 
 ### § 2. Activate Issue
@@ -276,17 +282,27 @@ Always report unresolved validation failures to orchestrator.
 
 **Skip if** the issue does not have the `design` label.
 
+Before running commands:
+- If the project defines `$VISUAL_QA_TARGET_CMD`, run it first to select the correct target and any companion validation commands.
+- Otherwise, use the current/default target from `visual-qa.conf`.
+
 Run a targeted visual check using the visual QA skill:
 - **Rendering change**: `$SCREENSHOT_CLI --no-build` → Read the PNG to verify
-- **Interaction / layout change**:
+- **Map-capable interaction / layout target**:
   1. `$VISUAL_QA_CLI doctor`
-  2. Start a visual QA session, preferably with the relevant fixture:
-     `$VISUAL_QA_CLI start --build --layout [PROJECT_TEST_FIXTURE]`
+  2. Start a visual QA session. If the project exposes a representative fixture path, prefer it:
+     - `$VISUAL_QA_CLI start --build --layout "$VISUAL_QA_FIXTURE"`
+     - Otherwise: `$VISUAL_QA_CLI start --build`
   3. `$VISUAL_QA_CLI map`
   4. Use map-first high-level commands to test the affected behavior
   5. Use `locate` only for literal text targets or OCR sanity checks
   6. Capture a screenshot or short recording if it adds evidence
-- **Broad interaction change**: Run the project-specific visual test battery
+- **Screenshot/OCR-only target**:
+  1. `$VISUAL_QA_CLI doctor`
+  2. `$VISUAL_QA_CLI start --build`
+  3. Use `locate`, `click`, `status`, and `screenshot` to test the affected behavior
+  4. Pair this with any project-specific runtime validation command (for example `$VISUAL_QA_SMOKE_CMD`) when available
+- **Broad interaction change**: Run `$VISUAL_QA_BATTERY_CMD` when the project defines one; otherwise note that no dedicated visual battery exists
 
 Focus on what your changes affect — not the full checklist. Do NOT capture golden baselines — that happens at submit-pr time.
 
@@ -449,7 +465,7 @@ Do NOT push or submit PR — orchestrator handles after review passes.
 
 **File**: `workflows/dev-fix.md`
 **Agent type**: Dev agents receiving review fix delegations
-**Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional)
+**Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional)
 
 **The workflow for dev agents receiving review fix delegations.**
 
@@ -507,17 +523,27 @@ $VALIDATE_CMD --recheck            # Only re-runs previously failed checks (skip
 
 **Skip if** the issue does not have the `design` label, or the fix does not touch UI code.
 
+Before running commands:
+- If the project defines `$VISUAL_QA_TARGET_CMD`, run it first to select the correct target and any companion validation commands.
+- Otherwise, use the current/default target from `visual-qa.conf`.
+
 Run a targeted visual check using the visual QA skill:
 - **Rendering fix**: `$SCREENSHOT_CLI --no-build` → Read the PNG to verify
-- **Interaction / layout fix**:
+- **Map-capable interaction / layout target**:
   1. `$VISUAL_QA_CLI doctor`
-  2. Start a visual QA session, preferably with the relevant fixture:
-     `$VISUAL_QA_CLI start --layout [PROJECT_TEST_FIXTURE]`
+  2. Start a visual QA session. If the project exposes a representative fixture path, prefer it:
+     - `$VISUAL_QA_CLI start --layout "$VISUAL_QA_FIXTURE"`
+     - Otherwise: `$VISUAL_QA_CLI start`
   3. `$VISUAL_QA_CLI map`
   4. Use map-first high-level commands to test the affected behavior
   5. Use `locate` only for literal text targets or OCR sanity checks
   6. Capture a screenshot or short recording if it adds evidence
-- **Broader regression risk**: Run the project-specific visual test battery
+- **Screenshot/OCR-only target**:
+  1. `$VISUAL_QA_CLI doctor`
+  2. `$VISUAL_QA_CLI start --build`
+  3. Use `locate`, `click`, `status`, and `screenshot` to test the affected behavior
+  4. Pair this with any project-specific runtime validation command (for example `$VISUAL_QA_SMOKE_CMD`) when available
+- **Broader regression risk**: Run `$VISUAL_QA_BATTERY_CMD` when the project defines one; otherwise note that no dedicated visual battery exists
 
 Focus on what the fix changes — not the full checklist.
 
@@ -596,7 +622,9 @@ Extract from delegation message:
 #### 1.1 Diff
 
 ```bash
-git -C [WORKTREE_PATH] diff main...HEAD
+BASE_BRANCH=${WORKTREE_DEFAULT_BRANCH:-$(git -C [WORKTREE_PATH] symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')}
+[ -n "$BASE_BRANCH" ] || BASE_BRANCH=main
+git -C [WORKTREE_PATH] diff "origin/$BASE_BRANCH"...HEAD
 ```
 
 Review for noteworthy findings only — skip minor style issues. Exclude research documents.
