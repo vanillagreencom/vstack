@@ -92,7 +92,7 @@ while [ $elapsed -lt $MAX_WAIT ]; do
     no_checks_count=$((no_checks_count + 1))
     if [ $no_checks_count -ge $max_no_checks ]; then
       echo "No CI checks after ${elapsed}s" >&2
-      echo "Possible causes: merge conflicts, paths-ignore filtering, or webhook delay." >&2
+      echo "Possible causes: merge conflicts, draft/defer-ci gating, or webhook delay." >&2
       merge_state=$(gh pr view "$PR_NUM" --json mergeStateStatus --jq '.mergeStateStatus' 2>/dev/null || echo "UNKNOWN")
       if [ "$merge_state" = "DIRTY" ] || [ "$merge_state" = "CONFLICTING" ]; then
         echo "PR has merge conflicts (state: $merge_state) — CI will not trigger." >&2

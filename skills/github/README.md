@@ -20,6 +20,21 @@ Set in `.env.local` or as environment variables:
 | `GH_BOT_USERNAME` | Bot username for filtering | `review-bot[bot]` |
 | `GH_ISSUE_PATTERN` | Regex for branch issue extraction | `[A-Z]+-[0-9]+` |
 
+## Minimum Setup
+
+To make this skill work:
+
+1. Authenticate the `gh` CLI: `gh auth login`
+2. Optionally set `GH_BOT_TOKEN` if PR/comment/review actions should use a bot account instead of your current `gh` login.
+3. Optionally set `GH_ISSUE_PATTERN` if your branch names do not use the default `ABC-123` style issue IDs.
+
+Quick check:
+
+```bash
+./scripts/github.sh pr-view 123 --json number,title,state
+./scripts/github.sh bot-token
+```
+
 ## Adding a New Command
 
 1. Create `scripts/commands/<command-name>.sh`

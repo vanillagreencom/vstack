@@ -292,7 +292,7 @@ If >4 suggestion items: show first 3 + `All N fixes`. Refine via "Other".
 
 1. **Check labels**. See issue tracker label configuration (project-level).
 
-2. **Determine sequence**: QA agent types are configurable per project. Example mappings: `needs-safety-audit` → safety, `needs-perf-test` → perf-qa, `needs-review` → arch-review, `design` → visual-qa-desktop (interactive targeted test via visual-qa-desktop skill).
+2. **Determine sequence**: QA agent types are configurable per project. Example mappings: `needs-safety-audit` → safety, `needs-perf-test` → perf-qa, `needs-review` → arch-review, `design` → visual-qa-desktop (interactive targeted test via visual-qa-desktop skill; screenshot/OCR-only targets may require `$VISUAL_QA_SWEEP_CMD` or equivalent representative capture coverage, not a single screenshot).
 
 **For each QA agent, execute steps 3–8:**
 

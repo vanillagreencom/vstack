@@ -53,6 +53,32 @@ This skill is a dependency for three workflow skills:
 |----------|---------|---------|
 | `DECISIONS_DIR` | Path to decision documents directory | `docs/decisions` |
 
+## Getting Started
+
+To make this skill work in a project:
+
+1. Create a decision documents directory.
+2. Create an `INDEX.md` file in that directory.
+3. Set `DECISIONS_DIR` and `DECISIONS_CMD`.
+
+Minimal bootstrap:
+
+```bash
+mkdir -p docs/decisions
+cat > docs/decisions/INDEX.md <<'EOF'
+# Architectural Decision Log
+
+Project decisions and significant path choices.
+
+| Date | ID | Research | Decision | Rationale | Revisit When | Status | Link |
+|------|----|----------|----------|-----------|--------------|--------|------|
+
+## Format Reference
+
+See the decider skill templates and schemas for the full format.
+EOF
+```
+
 ### CLI Setup
 
 Set `$DECISIONS_CMD` to point to the decisions CLI script:
@@ -60,6 +86,13 @@ Set `$DECISIONS_CMD` to point to the decisions CLI script:
 ```bash
 export DECISIONS_CMD="/path/to/skills/decider/scripts/decisions"
 export DECISIONS_DIR="docs/decisions"
+```
+
+Verify setup:
+
+```bash
+decisions list
+decisions next-id
 ```
 
 ## CLI Commands

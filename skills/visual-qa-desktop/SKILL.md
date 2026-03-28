@@ -51,6 +51,8 @@ tools/visual-qa-desktop ...
 3. **Interact + verify**: click/drag/screenshot, re-map after layout changes only when map support exists
 4. **Cleanup**: `scripts/visual-qa-desktop stop`
 
+**Screenshot/OCR-only targets**: When a target does not expose live map/layout support, one screenshot is only enough for narrow rendering checks. For component viewers, showcases, and other multi-state surfaces, run a representative capture sweep. See `references/screenshot-target-sweep.md`.
+
 ## Commands
 
 | Command | Purpose |

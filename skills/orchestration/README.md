@@ -81,6 +81,26 @@ Set these in `.env.local` or export them in the shell that runs the workflow. `.
 | `$BOT_CHECK_NAME` | Optional CI check name for early review detection | — |
 | `$HARNESS_CMD` | Optional `parallel-launch` command template with `{issue}` placeholder | — |
 
+## Minimum Setup
+
+To make orchestration workflows usable in a project:
+
+1. Configure the core command aliases in `.env.local`:
+   - `$ISSUE_CLI`
+   - `$GIT_HOST_CLI`
+   - `$WORKTREE_CLI`
+   - `$VALIDATE_CMD`
+2. Install the companion skills those commands point at.
+3. Verify each command works from the project root before invoking a workflow.
+
+Typical first checks:
+
+```bash
+$ISSUE_CLI --help
+$GIT_HOST_CLI --help
+$WORKTREE_CLI list
+```
+
 ## Creating a New Rule
 
 1. Choose the category (see `rules/_sections.md`)

@@ -59,6 +59,20 @@ classify_error_type() {
     fi
 }
 
+count_failed_checks() {
+    local checks_json="$1"
+
+    echo "$checks_json" | jq 'map(select(.state == "FAILURE" or .bucket == "fail")) | length'
+}
+
+select_failed_actions_check() {
+    local checks_json="$1"
+
+    echo "$checks_json" |
+        jq -c '[.[] | select(.state == "FAILURE" or .bucket == "fail")
+            | select((.link // "") | test("/actions/runs/[0-9]+"))] | .[0] // empty'
+}
+
 main() {
     local pr_num="" lines=100 format="safe"
 
@@ -109,7 +123,7 @@ main() {
 
     # Get failed checks
     local checks_json
-    if ! checks_json=$(json_or_default '[]' array gh pr checks "$pr_num" --json name,state,workflowName,workflowRunDatabaseId); then
+    if ! checks_json=$(json_or_default '[]' array gh pr checks "$pr_num" --json name,state,link,workflow,bucket); then
         if [ "$format" = "safe" ]; then
             jq -n --arg pr "$pr_num" '{error: "ci_fetch_failed", details: ("Failed to fetch CI checks for PR #" + $pr)}'
             exit 0
@@ -118,27 +132,54 @@ main() {
         exit 1
     fi
 
-    # Find first failed check
-    local failed_check
-    failed_check=$(echo "$checks_json" | jq -r '[.[] | select(.state == "FAILURE")] | .[0] // empty')
+    # Find the first failed GitHub Actions check. External providers (for example
+    # Codecov) do not expose a workflow run ID that `gh run view` can inspect.
+    local failed_check failed_count
+    failed_count=$(count_failed_checks "$checks_json")
+    failed_check=$(select_failed_actions_check "$checks_json")
 
     if [ -z "$failed_check" ]; then
-        if [ "$format" = "safe" ]; then
-            jq -n '{error: "No failed checks found for this PR"}'
+        if [ "$failed_count" -eq 0 ]; then
+            if [ "$format" = "safe" ]; then
+                jq -n '{error: "No failed checks found for this PR"}'
+            else
+                echo "No failed checks found for PR #$pr_num"
+            fi
         else
-            echo "No failed checks found for PR #$pr_num"
+            if [ "$format" = "safe" ]; then
+                jq -n '{error: "No failed GitHub Actions checks found for this PR"}'
+            else
+                echo "No failed GitHub Actions checks found for PR #$pr_num"
+            fi
         fi
         exit 0
     fi
 
-    local run_id job_name workflow_name
-    run_id=$(echo "$failed_check" | jq -r '.workflowRunDatabaseId')
+    local run_id="" job_id="" job_name workflow_name check_link
     job_name=$(echo "$failed_check" | jq -r '.name')
-    workflow_name=$(echo "$failed_check" | jq -r '.workflowName')
+    workflow_name=$(echo "$failed_check" | jq -r 'if (.workflow | type) == "object" then .workflow.name // empty else .workflow // empty end')
+    check_link=$(echo "$failed_check" | jq -r '.link // empty')
+
+    if [[ "$check_link" =~ /actions/runs/([0-9]+)/jobs/([0-9]+) ]]; then
+        run_id="${BASH_REMATCH[1]}"
+        job_id="${BASH_REMATCH[2]}"
+    elif [[ "$check_link" =~ /actions/runs/([0-9]+) ]]; then
+        run_id="${BASH_REMATCH[1]}"
+        job_id=""
+    fi
+
+    if [ -z "$run_id" ]; then
+        echo "Error: unable to extract workflow run ID from check link: $check_link" >&2
+        exit 1
+    fi
 
     # Fetch failed logs
     local logs
-    logs=$(gh run view "$run_id" --log-failed 2>&1 | tail -"$lines" || echo "Failed to fetch logs")
+    if [ -n "$job_id" ]; then
+        logs=$(gh run view "$run_id" --job "$job_id" --log-failed 2>&1 | tail -"$lines" || echo "Failed to fetch logs")
+    else
+        logs=$(gh run view "$run_id" --log-failed 2>&1 | tail -"$lines" || echo "Failed to fetch logs")
+    fi
 
     # Classify error type
     local error_type
@@ -170,4 +211,6 @@ main() {
     esac
 }
 
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi

@@ -63,11 +63,14 @@ The visual QA tool itself reads `visual-qa.conf`. If your project uses the porta
 VISUAL_QA_TARGET_CMD="./scripts/select-visual-target"
 VISUAL_QA_FIXTURE="path/to/layout-fixture"
 VISUAL_QA_SMOKE_CMD="./scripts/ui-smoke"
+VISUAL_QA_SWEEP_CMD="./scripts/ui-sweep"
 VISUAL_QA_BATTERY_CMD="./scripts/ui-battery"
 VISUAL_QA_BASELINE_CMD="./scripts/capture-visual-baselines"
 ```
 
 See the repo-root `.env.local.example` for a ready-to-copy template.
+
+For screenshot/OCR-only targets such as component viewers or showcases, a single screenshot is not enough for broad visual changes. Run a representative capture sweep across affected categories or states. See [`references/screenshot-target-sweep.md`](./references/screenshot-target-sweep.md).
 
 ### Required variables
 

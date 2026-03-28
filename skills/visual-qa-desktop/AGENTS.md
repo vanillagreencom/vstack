@@ -119,6 +119,8 @@ scripts/visual-qa-desktop locate --all     # All visible text with positions
 
 If the selected target does not expose a live map, skip `map` and rely on `locate`, `status`, `click`, and `screenshot`. Do not use pane helpers on screenshot/OCR-only targets.
 
+For screenshot/OCR-only targets such as component viewers or showcases, do not stop at one screenshot when the change affects multiple states or categories. Run a representative capture sweep. See `references/screenshot-target-sweep.md`.
+
 ### 4. Interact + Verify
 
 ```bash

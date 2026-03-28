@@ -1,6 +1,6 @@
 # Issue Lifecycle
 
-> **Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional), `$BENCH_CLI` (optional), orchestration skill
+> **Dependencies**: `$ISSUE_CLI`, `$VALIDATE_CMD`, `$DECISIONS_CMD` (optional), `$VISUAL_QA_CLI` (optional), `$SCREENSHOT_CLI` (optional), `$VISUAL_QA_TARGET_CMD` (optional), `$VISUAL_QA_FIXTURE` (optional), `$VISUAL_QA_SMOKE_CMD` (optional), `$VISUAL_QA_SWEEP_CMD` (optional), `$VISUAL_QA_BATTERY_CMD` (optional), `$BENCH_CLI` (optional), orchestration skill
 
 **The workflow for all dev/QA agents receiving `Issue: [ISSUE_ID]` delegations.**
 
@@ -262,6 +262,7 @@ Run a targeted visual check using the visual QA skill:
   2. `$VISUAL_QA_CLI start --build`
   3. Use `locate`, `click`, `status`, and `screenshot` to test the affected behavior
   4. Pair this with any project-specific runtime validation command (for example `$VISUAL_QA_SMOKE_CMD`) when available
+  5. If the target is a component viewer, showcase, or other multi-state surface, run `$VISUAL_QA_SWEEP_CMD` when the project defines it; otherwise perform a representative sweep per `visual-qa-desktop/references/screenshot-target-sweep.md`
 - **Broad interaction change**: Run `$VISUAL_QA_BATTERY_CMD` when the project defines one; otherwise note that no dedicated visual battery exists
 
 Focus on what your changes affect — not the full checklist. Do NOT capture golden baselines — that happens at submit-pr time.

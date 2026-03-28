@@ -18,6 +18,33 @@ Record, query, and detect regressions in benchmark results using a structured JS
 | `BENCH_RESULTS_DIR` | Override results directory | `$PROJECT_ROOT/benchmarks/results` |
 | `BENCH_COMPONENT_MAP` | Custom component mapping script | `$PROJECT_ROOT/benchmarks/component-map.sh` |
 
+## Getting Started
+
+To make this skill work in a new repo:
+
+1. Decide where benchmark results should live.
+   Default: `benchmarks/results/`
+2. Record results through one of the bundled parsers or via `scripts/bench.sh record`.
+3. If your benchmark names do not map cleanly to component names, create `benchmarks/component-map.sh`.
+
+Minimal setup:
+
+```bash
+mkdir -p benchmarks/results
+```
+
+Optional component mapper:
+
+```bash
+# benchmarks/component-map.sh
+map_component() {
+    case "$1" in
+        my-prefix-*) echo "my_component" ;;
+        *)           echo "$1" ;;
+    esac
+}
+```
+
 ## Adding a Parser
 
 1. Create `scripts/parsers/parse-<tool>`

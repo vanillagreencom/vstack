@@ -1,40 +1,86 @@
-# Copy this file to `visual-qa.conf` in your project root and fill in the
-# values for your application. The visual-qa-desktop scripts source that project-root
-# file from the repo under test.
+# Copy this file to `visual-qa.conf` in your project root and uncomment or edit
+# the values for your application.
 #
-# Required core settings
+# Used by: `visual-qa-desktop` skill runtime
+# Read by:
+# - `scripts/visual-qa-desktop`
+# - `scripts/screenshot`
+#
+# What this file does:
+# - tells the visual-QA tools which binary to launch
+# - tells them how to build it
+# - tells them which app env vars control screenshot/layout/map behavior
+#
+# Path guidance:
+# - Use `$ROOT_DIR/...` for files that live in the target project repo.
+# - Keep command values runnable from the project root.
+
+# Optional target selector.
+# If unset, the default target below is used.
+VQA_TARGET="${VQA_TARGET:-app}"
+
+# ═══════════════════════════════════════════
+# DEFAULT TARGET
+# ═══════════════════════════════════════════
+
+# Friendly label used in logs and errors.
+VQA_TARGET_NAME="app"
+
+# Required: path to the binary the tool should launch.
 VQA_APP_BINARY="$ROOT_DIR/target/debug/my-app"
+
+# Required: command that builds the binary from the project root.
 VQA_BUILD_CMD="cargo build -p my-app --features visual-qa"
+
+# Required: window title used to find the launched window.
 VQA_WINDOW_TITLE="My App"
+
+# Required: name of the env var your app reads to decide where to write screenshots.
 VQA_SCREENSHOT_ENV_KEY="MY_APP_SCREENSHOT_DIR"
 
-# Optional layout/map integration
+# Optional: env var name your app reads for a layout fixture path.
 VQA_LAYOUT_ENV_KEY="MY_APP_LAYOUT_FIXTURE"
+
+# Optional: env var name your app reads for a live pane/split map JSON path.
 VQA_MAP_ENV_KEY="MY_APP_MAP_PATH"
+
+# Optional: env assignment(s) applied when no explicit `--layout` is passed.
 VQA_DEFAULT_LAYOUT_ENV="MY_APP_DEFAULT_LAYOUT=1"
 
-# Optional explicit capability overrides
-VQA_TARGET_NAME="app"
+# Optional explicit capability overrides.
+# Leave these true/false when your app's support is known and stable.
 VQA_SUPPORTS_LAYOUT="true"
 VQA_SUPPORTS_MAP="true"
 VQA_SUPPORTS_BASELINE="true"
+
+# Optional: on Linux, automatically open the live viewer after `start`.
 VQA_AUTO_WATCH="true"
 
-# Optional baseline configuration
+# Optional baseline configuration.
+# These defaults are sensible for many Rust desktop repos.
 VQA_BASELINE_FIXTURES_DIR="$ROOT_DIR/testdata/golden/layouts"
 VQA_BASELINE_GOLDEN_DIR="$ROOT_DIR/testdata/golden/screenshots/linux"
 VQA_BASELINE_FIXTURE_GLOB="*.ron"
 
-# Multi-target example:
+# ═══════════════════════════════════════════
+# MULTI-TARGET EXAMPLE
+# ═══════════════════════════════════════════
+#
+# Uncomment and edit this if your repo has a second visual-QA target such as a
+# component viewer or showcase binary.
+#
 # if [[ "${VQA_TARGET:-}" == "viewer" ]]; then
 #     VQA_TARGET_NAME="viewer"
 #     VQA_APP_BINARY="$ROOT_DIR/target/debug/my-viewer"
 #     VQA_BUILD_CMD="cargo build -p my-viewer"
 #     VQA_WINDOW_TITLE="Component Viewer"
 #     VQA_SCREENSHOT_ENV_KEY="MY_VIEWER_SCREENSHOT_DIR"
+#
+#     # Viewer targets often do not support layouts, live maps, or baselines.
 #     VQA_LAYOUT_ENV_KEY=""
 #     VQA_MAP_ENV_KEY=""
 #     VQA_DEFAULT_LAYOUT_ENV=""
+#
 #     VQA_SUPPORTS_LAYOUT="false"
 #     VQA_SUPPORTS_MAP="false"
 #     VQA_SUPPORTS_BASELINE="false"

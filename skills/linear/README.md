@@ -25,6 +25,19 @@ Set in `.env.local` or as environment variables:
 | `LINEAR_FORMAT` | Default output format | `safe` |
 | `LINEAR_TEAM_PREFIX` | Issue identifier prefix | `CC` |
 
+## Minimum Setup
+
+To make this skill work:
+
+1. Add `LINEAR_API_KEY` to `.env.local` or export it in your shell.
+2. Optionally set `LINEAR_TEAM` and `LINEAR_TEAM_PREFIX` if the defaults do not match your project.
+3. Verify auth:
+
+```bash
+./scripts/linear.sh auth-check
+./scripts/linear.sh sync --reconcile
+```
+
 ## Adding a New Resource
 
 1. Create `scripts/commands/<resource>.sh`

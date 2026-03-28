@@ -66,6 +66,7 @@ Set these in `.env.local` or export them in the shell that runs the workflow. `.
 | `$VISUAL_QA_TARGET_CMD` | Optional project helper to select a visual-QA target and companion validation commands | Optional |
 | `$VISUAL_QA_FIXTURE` | Representative layout fixture path for map-capable targets | Optional |
 | `$VISUAL_QA_SMOKE_CMD` | Runtime smoke-test command for screenshot/OCR-only targets | Optional |
+| `$VISUAL_QA_SWEEP_CMD` | Representative capture sweep command for screenshot/OCR-only targets | Optional |
 | `$VISUAL_QA_BATTERY_CMD` | Broad visual regression battery command | Optional |
 
 ### Agent types
