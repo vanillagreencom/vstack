@@ -11,7 +11,7 @@ Git worktree lifecycle management with env/config symlinks.
 ## Quick Start
 
 1. Run from the main checkout of a git repo that has an `origin` remote.
-2. Optionally copy the repo-root [`.env.local.example`](/mnt/Tertiary/dev/vstack/main/.env.local.example) to `.env.local` and set any `WORKTREE_*` or `BOT_*` values you want.
+2. Optionally copy the repo-root [`.env.local.example`](../../.env.local.example) to `.env.local` and set any `WORKTREE_*` or `BOT_*` values you want.
 3. Use the script:
 
 ```bash
