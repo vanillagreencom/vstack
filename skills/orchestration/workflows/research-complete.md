@@ -305,7 +305,7 @@ Count distinct domains across merged requirements from § 6.4. If 2+ domains, de
 1. **Group ALL requirements by domain** → one sub-issue per domain (including domains from original scope). Sub-issues must be in parent's project.
 2. **Title format**: `[Domain verb]: [scope] for [DECISION_ID]` (e.g., "Implement GBM tick generator for D012", "Add order panel view for D012")
 3. **Set labels**: `agent:[TYPE]` per domain, appropriate stack labels
-4. **Determine blocking order**: Read [agent-sequencing.md](workflows/agent-sequencing.md). Record as `blocks_items`/`blocked_by_items` for step 6.
+4. **Determine blocking order**: Read [agent-sequencing.md](agent-sequencing.md). Record as `blocks_items`/`blocked_by_items` for step 6.
 5. **Include supplementary findings** from agent reports as requirements in the appropriate domain sub-issue -- don't create separate issues for small supplementary items that belong to the same domain
 6. **Build audit-input file** with formatted titles:
    - Schema: [audit-issues-input.md](../schemas/audit-issues-input.md)

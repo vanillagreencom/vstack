@@ -50,3 +50,9 @@ To make this skill work:
 
 - `curl` for API calls
 - `jq` for JSON processing
+
+## Workflow Patterns
+
+For higher-level issue/project transitions used by orchestration and TPM workflows, see:
+
+- [patterns/workflow-actions.md](./patterns/workflow-actions.md)

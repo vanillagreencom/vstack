@@ -77,7 +77,7 @@ WT_PATH=$($WORKTREE_CLI path $ISSUE_ID 2>/dev/null || pwd)
      [[ -z "$AGENT" ]] && AGENT=$($ISSUE_CLI cache issues get $ISSUE_ID --format=compact | jq -r '[.labels[] | select(startswith("agent:"))] | first | split(":")[1] // empty')
      ```
 
-2. **Group items by agent domain** if multi-domain. Sequential per [agent-sequencing.md](workflows/agent-sequencing.md).
+2. **Group items by agent domain** if multi-domain. Sequential per [agent-sequencing.md](agent-sequencing.md).
 
 3. **Detect team context**:
    ```bash

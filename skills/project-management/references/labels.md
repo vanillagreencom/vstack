@@ -10,6 +10,8 @@ See project label taxonomy for full taxonomy and colors.
 
 ## When to Create Labels
 
+**Authorization rule**: Never create any label unprompted. All label creation requires explicit user authorization.
+
 **Create when**:
 - New agent added (requires agent definition first)
 - New stack component introduced
@@ -26,8 +28,8 @@ See project label taxonomy for full taxonomy and colors.
 |------------|-------|----------|-------|
 | `agent:*` | tpm | Yes | Requires project agent definition |
 | Stack | tpm | Yes | Architectural change |
-| Workflow | tpm | No | Operational |
-| Classification | tpm | No | Operational |
+| Workflow | tpm | Yes | Operational, but still requires user authorization |
+| Classification | tpm | Yes | Operational, but still requires user authorization |
 | Platform | tpm | Yes | Architectural change |
 
 ## Creating Agent Labels
@@ -43,7 +45,7 @@ Agent labels are special — MUST have agent definition AND parent group.
    $ISSUE_CLI labels create --name "agent:[NAME]" --color "#9C27B0" --parent "Agent"
    ```
 
-**TPM should NOT create `agent:*` labels unprompted** — only after the agent definition and taxonomy entry exist.
+**TPM should NOT create any labels unprompted** — even workflow or classification labels require explicit user authorization. `agent:*` labels additionally require the agent definition and taxonomy entry to exist first.
 
 ## Creating Other Labels
 
@@ -81,7 +83,7 @@ Before:
 - [ ] No existing label covers this
 - [ ] Determined parent group (exclusive) or none (independent)
 - [ ] Color consistent with category
-- [ ] Approval obtained if required
+- [ ] Explicit user authorization obtained
 
 After:
 - [ ] Label created in issue tracker

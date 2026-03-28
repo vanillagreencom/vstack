@@ -192,6 +192,10 @@ Done issues auto-unblock. Keep relations for history.
 
 **Script help**: `linear.sh <resource> --help`
 
+## Workflow Actions
+
+For multi-step state transitions, hierarchy changes, relation fixes, project state changes, and roadmap/audit execution patterns, see [patterns/workflow-actions.md](patterns/workflow-actions.md).
+
 ## Dependencies
 
 - `curl` for API calls

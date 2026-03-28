@@ -106,7 +106,7 @@ Blocks: [BLOCKED_ISSUE_IDS or "none"]
 
 ### If Bundled Issue
 
-**Agent grouping**: Group pending sub-issues by `agent:[TYPE]` label. Read [agent-sequencing.md](workflows/agent-sequencing.md) for ordering. Process sequentially: first group → wait for completion → validate (§ 3) → collect handoff notes → next group. Each agent receives its sub-issues + completed sub-issues from prior agents as context.
+**Agent grouping**: Group pending sub-issues by `agent:[TYPE]` label. Read [agent-sequencing.md](agent-sequencing.md) for ordering. Process sequentially: first group → wait for completion → validate (§ 3) → collect handoff notes → next group. Each agent receives its sub-issues + completed sub-issues from prior agents as context.
 
 **Handoff collection** (between agent groups): After each agent group returns and passes § 3 validation, before delegating the next group:
 

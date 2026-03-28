@@ -104,6 +104,12 @@ linear.sh sync --full           # Full re-sync
 | `--labels` | Comma-separated names | Warn + skip invalid, continue |
 | `--assignee` | Name or `me` | Silent fail |
 
+## Workflow Patterns
+
+| Pattern | Use For |
+|---------|---------|
+| [patterns/workflow-actions.md](patterns/workflow-actions.md) | Multi-step issue/project state changes used by orchestration and TPM workflows |
+
 ## Resources
 
 ### ctx7 CLI
