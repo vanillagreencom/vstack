@@ -2,6 +2,12 @@
 
 Guidelines for categorizing review findings as fix (apply in PR) vs issue (track separately). Applies to any codebase — bias toward reliability when uncertain.
 
+## Verification Prerequisite
+
+Before classifying any comment as noise, stale, or not actionable — read the actual file(s) and location(s) it references. Verify against current code. A comment is only stale if the code proves it so; never infer staleness from comment text, age, or assumptions about what prior fixes addressed.
+
+**No file read = no dismissal.** The cost of reading a file is low; the cost of wrongly dismissing a valid comment is a bug shipped to production.
+
 ## Decision Flow
 
 For each potential suggestion, evaluate in order:

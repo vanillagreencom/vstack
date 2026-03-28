@@ -184,7 +184,7 @@ Blocking: [true/false]
 URL: [URL]
 ---
 
-1. Read `workflows/recommendation-bias.md`. Apply its decision flow to ALL findings.
+1. Read `workflows/recommendation-bias.md`. Apply its verification prerequisite and decision flow to ALL findings — read the actual source files before classifying any comment.
 2. Classify into arrays per `schemas/review-finding.md` schema:
    - `blockers[]`: Passed checks + blocking=true or P1/P2 priority
    - `suggestions[]`: Passed checks + blocking=false
