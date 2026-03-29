@@ -209,6 +209,15 @@ case "${1:-}" in
       git -C "$PROJECT_ROOT" worktree add --no-track -b "$BRANCH" "$WT_PATH" "origin/$DEFAULT_BRANCH" >/dev/null 2>&1
     fi
 
+    # Set upstream tracking if remote branch exists
+    CREATED_BRANCH=$(git -C "$WT_PATH" branch --show-current 2>/dev/null)
+    if [[ -n "$CREATED_BRANCH" ]]; then
+      _REMOTE="${BOT_REMOTE_NAME:-origin}"
+      if git -C "$WT_PATH" rev-parse --verify "$_REMOTE/$CREATED_BRANCH" &>/dev/null; then
+        git -C "$WT_PATH" branch --set-upstream-to="$_REMOTE/$CREATED_BRANCH" "$CREATED_BRANCH" >/dev/null 2>&1 || true
+      fi
+    fi
+
     # Set up symlinks, copies, and bot config
     mkdir -p "$TREES_DIR"
     setup_worktree_links "$WT_PATH"
