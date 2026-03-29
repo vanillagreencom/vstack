@@ -215,6 +215,7 @@ case "${1:-}" in
       _REMOTE="${BOT_REMOTE_NAME:-origin}"
       if git -C "$WT_PATH" rev-parse --verify "$_REMOTE/$CREATED_BRANCH" &>/dev/null; then
         git -C "$WT_PATH" branch --set-upstream-to="$_REMOTE/$CREATED_BRANCH" "$CREATED_BRANCH" >/dev/null 2>&1 || true
+        git -C "$WT_PATH" merge --ff-only "$_REMOTE/$CREATED_BRANCH" >/dev/null 2>&1 || true
       fi
     fi
 
