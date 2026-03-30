@@ -334,12 +334,43 @@ impl TabbedSelect {
         self.clamp_scroll();
     }
 
+    /// Compute the rendered row index for the current cursor item.
+    ///
+    /// Rendered rows include group headers and blank separators that don't
+    /// exist in the flat item index, so we walk the tab structure to count them.
+    fn cursor_row(&self) -> usize {
+        let tab = &self.tabs[self.active_tab];
+        let mut row = 0;
+        let mut flat_idx = 0;
+
+        for (gi, group) in tab.groups.iter().enumerate() {
+            if !group.label.is_empty() && tab.groups.len() > 1 {
+                if gi > 0 {
+                    row += 1; // blank separator between groups
+                }
+                row += 1; // group header
+            }
+            for _ in &group.items {
+                if flat_idx == self.cursor {
+                    return row;
+                }
+                row += 1;
+                flat_idx += 1;
+            }
+        }
+        row
+    }
+
     fn adjust_scroll(&mut self) {
         let visible = self.list_visible_rows.max(1);
-        if self.cursor < self.scroll {
-            self.scroll = self.cursor;
-        } else if self.cursor >= self.scroll + visible {
-            self.scroll = self.cursor.saturating_sub(visible - 1);
+        let row = self.cursor_row();
+        // Reserve space for a description line below the cursor
+        let row_end = row + 2;
+
+        if row < self.scroll {
+            self.scroll = row;
+        } else if row_end >= self.scroll + visible {
+            self.scroll = row_end.saturating_sub(visible - 1);
         }
         self.clamp_scroll();
     }
@@ -408,6 +439,80 @@ mod tests {
             installed_scope: None,
             outdated: false,
         }
+    }
+
+    #[test]
+    fn adjust_scroll_accounts_for_group_headers() {
+        // Two groups with 3 items each. Rendered rows:
+        // row 0: group1 header
+        // row 1: item 0
+        // row 2: item 1
+        // row 3: item 2
+        // row 4: blank separator
+        // row 5: group2 header
+        // row 6: item 3
+        // row 7: item 4
+        // row 8: item 5
+        let mut select = TabbedSelect::new(
+            "Test",
+            vec![Tab {
+                name: "Items".into(),
+                groups: vec![
+                    ItemGroup {
+                        label: "Group A".into(),
+                        items: vec![item("a1"), item("a2"), item("a3")],
+                    },
+                    ItemGroup {
+                        label: "Group B".into(),
+                        items: vec![item("b1"), item("b2"), item("b3")],
+                    },
+                ],
+            }],
+            true,
+        );
+
+        select.list_visible_rows = 5;
+        select.rendered_total_rows = 9;
+
+        // Move cursor to item 4 (b2, rendered row 7)
+        select.cursor = 4;
+        select.adjust_scroll();
+        // row_end = 7 + 2 = 9, 9 >= 0 + 5, scroll = 9 - 4 = 5
+        assert!(
+            select.scroll >= 4,
+            "scroll should advance past group headers, got {}",
+            select.scroll
+        );
+
+        // Cursor item row 7 must be within visible window [scroll, scroll+5)
+        assert!(
+            select.cursor_row() >= select.scroll
+                && select.cursor_row() < select.scroll + select.list_visible_rows,
+            "cursor row {} not in visible window [{}, {})",
+            select.cursor_row(),
+            select.scroll,
+            select.scroll + select.list_visible_rows
+        );
+    }
+
+    #[test]
+    fn cursor_row_matches_flat_when_no_groups() {
+        let mut select = TabbedSelect::new(
+            "Test",
+            vec![Tab {
+                name: "Items".into(),
+                groups: vec![ItemGroup {
+                    label: String::new(),
+                    items: vec![item("a"), item("b"), item("c")],
+                }],
+            }],
+            true,
+        );
+
+        select.cursor = 0;
+        assert_eq!(select.cursor_row(), 0);
+        select.cursor = 2;
+        assert_eq!(select.cursor_row(), 2);
     }
 
     #[test]
