@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 const REPO: &str = "vanillagreencom/vstack";
 
-pub fn run() -> Result<()> {
+pub fn run(force: bool) -> Result<()> {
     let local_version = env!("CARGO_PKG_VERSION");
     let local_hash = env!("VSTACK_GIT_HASH");
 
@@ -15,11 +15,15 @@ pub fn run() -> Result<()> {
 
     match get_remote_version() {
         Some(remote_version) => {
-            if remote_version == local_version {
-                eprintln!("Already up to date.");
+            if remote_version == local_version && !force {
+                eprintln!("Already at latest version. Use --force to reinstall.");
                 return Ok(());
             }
-            eprintln!("Update available: {} → {}", local_version, remote_version);
+            if remote_version != local_version {
+                eprintln!("Update available: {} → {}", local_version, remote_version);
+            } else {
+                eprintln!("Forcing reinstall of {}...", local_version);
+            }
         }
         None => {
             eprintln!("Could not check remote version, updating anyway...");

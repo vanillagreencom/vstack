@@ -512,7 +512,7 @@ pub fn run(
     // Run CLI binary update if requested
     if update_cli {
         eprintln!("\nUpdating vstack binary...\n");
-        let _ = crate::commands::update::run();
+        let _ = crate::commands::update::run(false);
         eprintln!("\nRestart vstack to use the new version.");
     }
 

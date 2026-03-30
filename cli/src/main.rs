@@ -101,7 +101,11 @@ enum Commands {
     Check,
 
     /// Update vstack to the latest version
-    Update,
+    Update {
+        /// Force reinstall even if version matches
+        #[arg(short, long)]
+        force: bool,
+    },
 
     /// Scaffold a new skill or agent template
     Init { name: Option<String> },
@@ -123,7 +127,7 @@ fn main() -> Result<()> {
         Some(Commands::Remove { names, global }) => commands::remove::run(&names, global),
         Some(Commands::List { global, agent }) => commands::list::run(global, agent.as_deref()),
         Some(Commands::Check) => commands::check::run(),
-        Some(Commands::Update) => commands::update::run(),
+        Some(Commands::Update { force }) => commands::update::run(force),
         Some(Commands::Init { name }) => commands::init::run(name.as_deref()),
         // No subcommand → default to add
         None => commands::add::run(

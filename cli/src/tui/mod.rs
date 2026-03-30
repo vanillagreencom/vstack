@@ -1174,7 +1174,7 @@ fn try_confirm_select(select: &mut TabbedSelect) -> Result<Option<SelectResult>>
             io::stdout().execute(LeaveAlternateScreen)?;
             terminal::disable_raw_mode()?;
             eprintln!("Updating vstack...\n");
-            let _ = crate::commands::update::run();
+            let _ = crate::commands::update::run(false);
             eprintln!("\nRestart vstack to use the new version.");
             std::process::exit(0);
         }
@@ -1410,7 +1410,7 @@ fn run_tabbed_select(
                                         io::stdout().execute(LeaveAlternateScreen)?;
                                         terminal::disable_raw_mode()?;
                                         eprintln!("Updating vstack...\n");
-                                        let _ = crate::commands::update::run();
+                                        let _ = crate::commands::update::run(false);
                                         eprintln!("\nRestart vstack to use the new version.");
                                         std::process::exit(0);
                                     }
