@@ -34,8 +34,8 @@ pub struct CustomHook {
     #[serde(default)]
     pub matcher: Option<String>,
     pub command: String,
-    /// What this hook enforces — used as safety prose for non-Claude-Code
-    /// harnesses (Cursor rules, OpenCode instructions, Codex inline prose).
+    /// What this hook does — inlined as instruction text in harnesses
+    /// that can't run scripts (Cursor, OpenCode, Codex).
     #[serde(default)]
     pub description: Option<String>,
     /// Which agents to apply to: "all", a role name ("engineer"),
@@ -260,7 +260,7 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push_str("# event = \"PreToolUse\"      # PreToolUse | PostToolUse | PostCompact | TaskCompleted\n");
     out.push_str("# matcher = \"Bash\"           # optional: Bash | Edit|Write | (omit for all)\n");
     out.push_str("# command = \"./scripts/my-hook.sh\"\n");
-    out.push_str("# description = \"What this hook enforces\"  # used as safety prose in non-Claude-Code harnesses\n");
+    out.push_str("# description = \"What this hook does\"     # inlined as instructions in non-Claude-Code harnesses\n");
     out.push_str("# agents = \"all\"             # \"all\", a role (\"engineer\"), or a list [\"rust\", \"iced\"]\n");
 
     append_skills_reference(&mut out, skills);

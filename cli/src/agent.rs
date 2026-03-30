@@ -271,14 +271,14 @@ pub fn extract_body_from_codex_toml(content: &str) -> Option<String> {
     Some(after[..end].to_string())
 }
 
-/// Generate a "Safety Hooks" section from custom hooks that have descriptions.
-/// Used by non-Claude-Code harnesses that can't run hook scripts natively.
+/// Generate a "Hook Rules" section from custom hooks that have descriptions.
+/// Harnesses that can't run scripts natively get this as inline instructions.
 pub fn custom_hooks_section(hooks: &[CustomHookEntry]) -> String {
     let with_desc: Vec<&CustomHookEntry> = hooks.iter().filter(|h| h.description.is_some()).collect();
     if with_desc.is_empty() {
         return String::new();
     }
-    let mut section = String::from("## Safety Hooks\n\n");
+    let mut section = String::from("## Hook Rules\n\n");
     for hook in with_desc {
         let matcher_info = hook
             .matcher
