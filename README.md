@@ -32,16 +32,17 @@ This makes `vstack` closer to a package manager than a static dotfiles repo.
 
 ## Features
 
-- Cross-harness install flow: Claude Code, Cursor, OpenCode, and Codex from one CLI.
-- Package source switching: install from this repo or another compatible repo.
-- Global and project scope: install once per user, or per project.
-- Skill dependency resolution: skills can declare required and optional dependencies in `SKILL.md`; required dependencies are auto-included transitively during install.
-- Config-driven attribution: `vstack.toml` maps extra skills to agents, role-wide skills to agent roles, and hook events to the roles that should receive them. Basically, map a skill to an agent in the TOML, that skill as added to the Agents .md specific to how it works in each harness.
-- Reconciliation: installed agents regenerate when skills/hooks change.
-- Source registry: previously used package repos are remembered and reusable from the TUI.
-- Safe defaults: project-only harnesses are blocked or skipped appropriately in global mode.
-- Update system built in. Update a skill in a repo, users get notified in the app and can easily update.
-- Fast terminal UX: native Rust app built with `ratatui` and `crossterm`.
+- **Cross-harness install**: Claude Code, Cursor, OpenCode, and Codex from one CLI.
+- **Package source management**: switch between repos, add/remove sources from the TUI.
+- **Global and project scope**: install once per user, or per project.
+- **Dependency resolution**: skills declare required/optional dependencies in `SKILL.md`; required deps are auto-included transitively.
+- **Config-driven attribution**: `vstack.toml` maps extra skills to agents, role-wide skills to agent roles, and hook events to roles.
+- **Project customization**: per-agent guidance, instructions, custom skills, and custom hooks via project-level `vstack.toml` — survives upstream updates.
+- **Reconciliation**: installed agents regenerate when skills/hooks change, preserving user edits.
+- **`vstack refresh`**: regenerate all agent files and re-copy skills from source after editing `vstack.toml`.
+- **Version-based update check**: notifies when the CLI version changes, not on every repo push. `vstack update --force` to rebuild from source.
+- **Source registry**: previously used package repos are remembered and reusable from the TUI.
+- **Fast terminal UX**: native Rust TUI with mouse support, built with `ratatui` and `crossterm`.
 
 ## Quick Start
 
@@ -56,7 +57,7 @@ vstack add vanillagreencom/vstack
 Useful commands:
 
 ```bash
-# Interactive install
+# Interactive install (TUI)
 vstack add vanillagreencom/vstack
 
 # Install from the current repo if you're inside a package source
@@ -71,6 +72,13 @@ vstack add vanillagreencom/vstack --all --global
 # Install specific skills to specific harnesses
 vstack add vanillagreencom/vstack --skill rust-safety,perf-zero-alloc --agent claude-code -y
 
+# Regenerate agents/skills after editing vstack.toml
+vstack refresh
+
+# Update the CLI binary
+vstack update              # skips if version matches
+vstack update --force      # always rebuilds from source
+
 # Inspect / remove
 vstack list
 vstack check
@@ -79,10 +87,10 @@ vstack remove rust-safety
 
 ## Project-Local Config
 
-Projects can keep local package configuration in `.env.local`. Copy [.env.local.example](./.env.local.example) to `.env.local`, then fill only the variables your project uses.
+Two config files live at the project root:
 
-- Use `.env.local` for project-level workflow config such as worktree behavior, issue-tracker tokens, bot auth, and optional orchestration helpers.
-- The `worktree` skill symlinks `.env.local` into created worktrees so those settings stay available in delegated sessions.
+- **`vstack.toml`** — agent customization (guidance, instructions, custom skills, custom hooks). Auto-created on first install. Edit and run `vstack refresh` to apply. See [Project Customization](#project-customization).
+- **`.env.local`** — workflow config for skills that need it (worktree behavior, issue-tracker tokens, bot auth). Copy [.env.local.example](./.env.local.example) and fill only the variables your project uses. The `worktree` skill symlinks this into created worktrees.
 
 ## How It Works
 
@@ -125,25 +133,37 @@ engineer = ["issue-lifecycle", "github", "worktree"]
 
 ### Project Customization
 
-The target project's `vstack.toml` can include per-agent customization that survives updates:
+`vstack add` auto-creates a `vstack.toml` at your project root with commented placeholders for every installed agent and skill. Edit the values, then run `vstack refresh` to apply.
+
+All sections survive upstream updates — they're re-applied from the config on every install and refresh.
 
 ```toml
-# Attach local skills to agents
+# What the agent should do when first invoked
+[agent-guidance]
+rust = "Read open issues and begin working on the highest-priority backend task."
+generalist = ""    # empty = no section generated
+
+# Project-specific rules appended to the bottom of agent files
+[agent-instructions]
+rust = "Always run clippy before committing."
+
+# Attach local skills to agents (beyond automatic prefix matching)
 [custom-skills]
 rust = [
   { name = "my-testing", description = "Custom integration testing patterns" },
 ]
+generalist = []    # empty = no extra skills
 
-# "Execute on Launch" — what the agent does when first invoked
-[agent-guidance]
-rust = "Read open issues and begin working on the highest-priority backend task."
-
-# Additional instructions (appended at the bottom of agent files)
-[agent-instructions]
-rust = "Always run clippy before committing."
+# Project-local hooks (Claude Code runs the command; other harnesses get the description as inline instructions)
+[[custom-hooks]]
+event = "PreToolUse"
+matcher = "Bash"
+command = "./scripts/no-force-push.sh"
+description = "Never run git push --force on main or master."
+agents = "all"     # "all", a role ("engineer"), or a list ["rust", "iced"]
 ```
 
-These sections are re-applied on every `vstack add`, so they are never overwritten by upstream skill/agent updates.
+If you edit a generated agent file directly (e.g., add an "Additional Instructions" section), vstack extracts your edits and saves them to `vstack.toml` before the next regeneration — so both approaches work.
 
 ### Architecture
 
