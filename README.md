@@ -134,9 +134,9 @@ rust = [
   { name = "my-testing", description = "Custom integration testing patterns" },
 ]
 
-# "When to Use" guidance (injected after agent intro)
+# "Execute on Launch" — what the agent does when first invoked
 [agent-guidance]
-rust = "Use when working on backend Rust services."
+rust = "Read open issues and begin working on the highest-priority backend task."
 
 # Additional instructions (appended at the bottom of agent files)
 [agent-instructions]

@@ -164,10 +164,10 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push('\n');
 
     // ── agent-guidance ──
-    out.push_str("\n# ── When to Use ──────────────────────────────────────\n");
-    out.push_str("# Adds a \"## When to Use\" section in each agent file,\n");
-    out.push_str("# after the agent's built-in description. Tells the\n");
-    out.push_str("# AI when to pick this agent for your project.\n");
+    out.push_str("\n# ── Execute on Launch ─────────────────────────────────\n");
+    out.push_str("# Adds a \"## Execute on Launch\" section near the top\n");
+    out.push_str("# of each agent file. Defines what the agent should\n");
+    out.push_str("# do when it is first invoked in your project.\n");
     out.push_str("#\n");
     out.push_str("[agent-guidance]\n");
     for name in agents {
