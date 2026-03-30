@@ -150,56 +150,58 @@ pub fn ensure_project_config(project_root: &Path, agents: &[String], skills: &[S
 }
 
 fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
-    let mut out = String::from(
-        "# vstack.toml — project-level agent customization\n\
-         #\n\
-         # Customize agent behavior for this project. These settings are merged\n\
-         # into generated agent files each time agents are installed or refreshed.\n\
-         #\n\
-         # After editing this file, run `vstack refresh` to regenerate agent files.\n\
-         # Uncomment and edit the sections below as needed.\n\n",
-    );
+    let mut out = String::new();
 
-    // [agent-guidance]
-    out.push_str(
-        "# When to use each agent — appears near the top of the generated agent file.\n",
-    );
+    out.push_str("# ─────────────────────────────────────────────────────\n");
+    out.push_str("# vstack.toml — project-level agent customization\n");
+    out.push_str("#\n");
+    out.push_str("# Customize agent behavior for this project. These\n");
+    out.push_str("# settings are merged into generated agent files on\n");
+    out.push_str("# every install and refresh.\n");
+    out.push_str("#\n");
+    out.push_str("# After editing, run:  vstack refresh\n");
+    out.push_str("# ─────────────────────────────────────────────────────\n");
+    out.push('\n');
+
+    // ── agent-guidance ──
+    out.push_str("\n# ── When to Use ──────────────────────────────────────\n");
+    out.push_str("# Guidance shown near the top of each agent file.\n");
+    out.push_str("# Helps the AI (or user) decide which agent to pick.\n");
+    out.push_str("#\n");
     out.push_str("# [agent-guidance]\n");
     for name in agents {
-        out.push_str(&format!(
-            "# {} = \"When to use this agent in your project.\"\n",
-            name
-        ));
+        out.push_str(&format!("# {} = \"\"\n", name));
     }
     if agents.is_empty() {
-        out.push_str("# my-agent = \"When to use this agent in your project.\"\n");
+        out.push_str("# my-agent = \"\"\n");
     }
-    out.push('\n');
 
-    // [agent-instructions]
-    out.push_str("# Additional instructions appended to the bottom of each agent file.\n");
+    // ── agent-instructions ──
+    out.push_str("\n\n# ── Additional Instructions ──────────────────────────\n");
+    out.push_str("# Appended to the bottom of each agent file.\n");
+    out.push_str("# Project-specific rules, conventions, or reminders.\n");
+    out.push_str("#\n");
     out.push_str("# [agent-instructions]\n");
     for name in agents {
-        out.push_str(&format!(
-            "# {} = \"Project-specific rules for this agent.\"\n",
-            name
-        ));
+        out.push_str(&format!("# {} = \"\"\n", name));
     }
     if agents.is_empty() {
-        out.push_str("# my-agent = \"Project-specific rules for this agent.\"\n");
+        out.push_str("# my-agent = \"\"\n");
     }
-    out.push('\n');
 
-    // [custom-skills]
-    out.push_str("# Extra skills to attach to specific agents (beyond automatic matching).\n");
+    // ── custom-skills ──
+    out.push_str("\n\n# ── Custom Skills ────────────────────────────────────\n");
+    out.push_str("# Attach extra skills to agents beyond automatic\n");
+    out.push_str("# prefix matching. Each entry is a list of\n");
+    out.push_str("# { name, description } objects.\n");
+    out.push_str("#\n");
     out.push_str("# [custom-skills]\n");
-    for name in agents {
+    if !agents.is_empty() {
         out.push_str(&format!(
             "# {} = [\n#   {{ name = \"my-skill\", description = \"What this skill does\" }},\n# ]\n",
-            name
+            agents[0]
         ));
-    }
-    if agents.is_empty() {
+    } else {
         out.push_str("# my-agent = [\n#   { name = \"my-skill\", description = \"What this skill does\" },\n# ]\n");
     }
 
@@ -212,73 +214,70 @@ fn update_project_config(path: &Path, agents: &[String], skills: &[String]) {
         return;
     };
 
-    let mut additions = String::new();
-
     // Find agents not already mentioned as a TOML key (commented or active).
-    // Match `name =` or `name=` patterns to avoid false positives from partial
-    // matches (e.g., agent "rust" matching "rust-arch").
     let new_agents: Vec<&String> = agents
         .iter()
-        .filter(|name| {
-            let key_pat = format!("{} =", name);
-            let key_pat2 = format!("{}=", name);
-            let commented_pat = format!("# {} =", name);
-            let commented_pat2 = format!("# {}=", name);
-            !existing.contains(&key_pat)
-                && !existing.contains(&key_pat2)
-                && !existing.contains(&commented_pat)
-                && !existing.contains(&commented_pat2)
-        })
+        .filter(|name| agent_mentioned_in(&existing, name))
         .collect();
-
-    if !new_agents.is_empty() {
-        additions.push_str(&format!(
-            "\n# New agents added — uncomment to customize:\n"
-        ));
-        for name in &new_agents {
-            additions.push_str(&format!(
-                "# [agent-guidance]\n# {} = \"When to use this agent in your project.\"\n",
-                name
-            ));
-            additions.push_str(&format!(
-                "# [agent-instructions]\n# {} = \"Project-specific rules for this agent.\"\n",
-                name
-            ));
-        }
-    }
 
     // Strip old skills reference block and re-append with current list
     let content = strip_skills_reference(&existing);
     let mut out = content.trim_end().to_string();
     out.push('\n');
-    if !additions.is_empty() {
-        out.push_str(&additions);
-    }
-    append_skills_reference(&mut out, skills);
 
+    if !new_agents.is_empty() {
+        out.push_str("\n\n# ── New agents ───────────────────────────────────────\n");
+        out.push_str("# Uncomment and move into the sections above.\n");
+        out.push_str("#\n");
+        out.push_str("# [agent-guidance]\n");
+        for name in &new_agents {
+            out.push_str(&format!("# {} = \"\"\n", name));
+        }
+        out.push_str("#\n");
+        out.push_str("# [agent-instructions]\n");
+        for name in &new_agents {
+            out.push_str(&format!("# {} = \"\"\n", name));
+        }
+    }
+
+    append_skills_reference(&mut out, skills);
     let _ = std::fs::write(path, out);
+}
+
+/// Check if an agent name already appears as a TOML key in the file.
+fn agent_mentioned_in(content: &str, name: &str) -> bool {
+    let patterns = [
+        format!("{} =", name),
+        format!("{}=", name),
+        format!("# {} =", name),
+        format!("# {}=", name),
+    ];
+    !patterns.iter().any(|p| content.contains(p))
 }
 
 fn append_skills_reference(out: &mut String, skills: &[String]) {
     if !skills.is_empty() {
-        out.push('\n');
-        out.push_str("# Installed skills (for reference when adding custom-skills above):\n");
+        out.push_str("\n\n# ── Installed skills (reference) ─────────────────────\n");
         for name in skills {
-            out.push_str(&format!("#   - {}\n", name));
+            out.push_str(&format!("#   {}\n", name));
         }
     }
 }
 
 fn strip_skills_reference(content: &str) -> String {
-    // Remove the "# Installed skills..." block — only if it's a trailing comment
-    // block (every line after the marker starts with '#' or is blank).
-    if let Some(pos) = content.find("# Installed skills (for reference") {
-        let after = &content[pos..];
-        let all_comments = after
-            .lines()
-            .all(|line| line.starts_with('#') || line.trim().is_empty());
-        if all_comments {
-            return content[..pos].to_string();
+    // Remove the skills reference block — try both old and new header formats.
+    for marker in [
+        "# ── Installed skills (reference)",
+        "# Installed skills (for reference",
+    ] {
+        if let Some(pos) = content.find(marker) {
+            let after = &content[pos..];
+            let all_comments = after
+                .lines()
+                .all(|line| line.starts_with('#') || line.trim().is_empty());
+            if all_comments {
+                return content[..pos].to_string();
+            }
         }
     }
     content.to_string()
@@ -622,10 +621,14 @@ rust = "Use for Rust work."
         create_project_config(&path, &["rust".into()], &["rust-arch".into()]);
         let initial = std::fs::read_to_string(&path).unwrap();
         assert!(initial.contains("# rust ="));
-        assert!(initial.contains("#   - rust-arch"));
+        assert!(initial.contains("#   rust-arch"));
 
         // Update with "rust" + new "iced" agent and new skill
-        update_project_config(&path, &["rust".into(), "iced".into()], &["rust-arch".into(), "trading-design".into()]);
+        update_project_config(
+            &path,
+            &["rust".into(), "iced".into()],
+            &["rust-arch".into(), "trading-design".into()],
+        );
         let updated = std::fs::read_to_string(&path).unwrap();
 
         // Original rust placeholders preserved
@@ -633,9 +636,9 @@ rust = "Use for Rust work."
         // New iced agent added
         assert!(updated.contains("# iced ="));
         // Skills reference updated
-        assert!(updated.contains("#   - trading-design"));
+        assert!(updated.contains("#   trading-design"));
         // Old skills still listed
-        assert!(updated.contains("#   - rust-arch"));
+        assert!(updated.contains("#   rust-arch"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -659,7 +662,11 @@ rust = "Always use thiserror for errors."
         std::fs::write(&path, user_content).unwrap();
 
         // Update with rust (already present) + new iced
-        update_project_config(&path, &["rust".into(), "iced".into()], &["trading-design".into()]);
+        update_project_config(
+            &path,
+            &["rust".into(), "iced".into()],
+            &["trading-design".into()],
+        );
         let updated = std::fs::read_to_string(&path).unwrap();
 
         // User content preserved
@@ -667,8 +674,12 @@ rust = "Always use thiserror for errors."
         assert!(updated.contains("rust = \"Always use thiserror for errors.\""));
         // New agent added as comment
         assert!(updated.contains("# iced ="));
-        // Rust not duplicated (already in file as active key)
-        assert!(!updated.contains("# New agents") || !updated.contains("# rust ="));
+        // Rust not duplicated
+        let iced_section = updated.find("# iced =").unwrap();
+        assert!(
+            !updated[iced_section..].contains("# rust ="),
+            "rust should not appear in new agents section"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -689,7 +700,7 @@ rust = "Always use thiserror for errors."
         update_project_config(&path, &["rust".into()], &["rust-arch".into()]);
         let after = std::fs::read_to_string(&path).unwrap();
 
-        assert!(!after.contains("# New agents added"));
+        assert!(!after.contains("── New agents"));
         // Content should be essentially the same (skills ref regenerated but identical)
         assert_eq!(before.trim(), after.trim());
 
