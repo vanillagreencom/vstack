@@ -572,11 +572,8 @@ fn is_vstack_root(dir: &Path) -> bool {
     {
         return false;
     }
-    // vstack.toml is definitive
-    if dir.join("vstack.toml").exists() {
-        return true;
-    }
-    // Require at least 2 of 3 standard source dirs
+    // Require at least 2 of 3 standard source dirs (agents/, skills/, hooks/).
+    // A vstack.toml alone is not enough — project roots also have one for customization.
     let count = [
         dir.join("agents").is_dir(),
         dir.join("skills").is_dir(),
