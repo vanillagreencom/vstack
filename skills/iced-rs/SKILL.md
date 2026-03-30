@@ -50,6 +50,7 @@ App > Window > Shell > Zone > TitleBar > Panel > Canvas > Overlay
 - `hr-widget-tree-consistency` - Keep widget structure stable across interaction states; toggle behavior, not wrappers
 - `hr-view-is-pure` - Keep `view()` a pure projection of state; mutate only in `update()`
 - `hr-scroll-state` - `scrollable` events do not report initial layout; capture initial size explicitly before relying on scroll updates
+- `hr-animation-invalidation` - Animated geometry changes require both `request_redraw` and `invalidate_layout`; paint-only changes need just redraw
 - `hr-minimum-pane-size` - `PaneGrid::min_size` is shared across panes; handle per-pane minimums in pane content/layout
 
 ### 2. Development Practices (HIGH)
@@ -77,6 +78,7 @@ App > Window > Shell > Zone > TitleBar > Panel > Canvas > Overlay
 
 - `interaction-overlay-starvation` - Cursor overlays starve underlying drag targets
 - `interaction-pane-drag-feedback` - Keep pane_grid drag feedback inside pane subtree
+- `interaction-split-ownership` - When `mouse_area` handles semantics and `button` handles visuals, flag the split and verify hit areas match
 
 ## How to Use
 
