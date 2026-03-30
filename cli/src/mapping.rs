@@ -2,6 +2,67 @@ use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+/// Custom skill entry from project config
+#[derive(Debug, Clone, Deserialize)]
+pub struct CustomSkill {
+    pub name: String,
+    pub description: String,
+}
+
+/// Project-level agent customization config.
+///
+/// Loaded from `vstack.toml` at the project root. These sections are
+/// independent of the source repo's mapping sections (`[agent-skills]`,
+/// `[role-skills]`, `[hook-events]`) and survive updates.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct ProjectConfig {
+    #[serde(rename = "custom-skills")]
+    pub custom_skills: HashMap<String, Vec<CustomSkill>>,
+    #[serde(rename = "agent-guidance")]
+    pub agent_guidance: HashMap<String, String>,
+    #[serde(rename = "agent-instructions")]
+    pub agent_instructions: HashMap<String, String>,
+}
+
+impl ProjectConfig {
+    /// Load project config from a directory's `vstack.toml`.
+    /// Returns default (empty) if the file is missing or unparseable.
+    pub fn load(project_root: &Path) -> Self {
+        let path = project_root.join("vstack.toml");
+        if !path.exists() {
+            return Self::default();
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            return Self::default();
+        };
+        toml::from_str(&content).unwrap_or_default()
+    }
+
+    /// Get custom skill pairs for an agent
+    pub fn custom_skills_for(&self, agent_name: &str) -> Vec<(String, String)> {
+        self.custom_skills
+            .get(agent_name)
+            .map(|skills| {
+                skills
+                    .iter()
+                    .map(|s| (s.name.clone(), s.description.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Get guidance text for an agent
+    pub fn guidance_for(&self, agent_name: &str) -> Option<&str> {
+        self.agent_guidance.get(agent_name).map(|s| s.as_str())
+    }
+
+    /// Get additional instructions for an agent
+    pub fn instructions_for(&self, agent_name: &str) -> Option<&str> {
+        self.agent_instructions.get(agent_name).map(|s| s.as_str())
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct MappingConfig {
@@ -265,5 +326,65 @@ mod tests {
         let matched = config.skills_for_agent("reviewer-iced", &AgentRole::Reviewer, &available);
         assert!(matched.contains(&"iced-rs".to_string()));
         assert!(matched.contains(&"trading-design".to_string()));
+    }
+
+    #[test]
+    fn project_config_parses_all_sections() {
+        let toml = r#"
+[custom-skills]
+rust = [
+  { name = "my-testing", description = "Custom testing patterns" },
+  { name = "my-lint", description = "Custom lint rules" },
+]
+
+[agent-guidance]
+rust = "Use when working on backend Rust services."
+
+[agent-instructions]
+rust = "Always run clippy before committing."
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        let skills = config.custom_skills_for("rust");
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].0, "my-testing");
+        assert_eq!(skills[1].1, "Custom lint rules");
+
+        assert_eq!(
+            config.guidance_for("rust"),
+            Some("Use when working on backend Rust services.")
+        );
+        assert_eq!(
+            config.instructions_for("rust"),
+            Some("Always run clippy before committing.")
+        );
+
+        // Unknown agent returns empty/None
+        assert!(config.custom_skills_for("unknown").is_empty());
+        assert!(config.guidance_for("unknown").is_none());
+        assert!(config.instructions_for("unknown").is_none());
+    }
+
+    #[test]
+    fn project_config_missing_file_returns_default() {
+        let config = ProjectConfig::load(std::path::Path::new("/nonexistent/path"));
+        assert!(config.custom_skills.is_empty());
+        assert!(config.agent_guidance.is_empty());
+        assert!(config.agent_instructions.is_empty());
+    }
+
+    #[test]
+    fn project_config_ignores_mapping_sections() {
+        // A vstack.toml with both source mapping and project customization sections
+        let toml = r#"
+[agent-skills]
+iced = ["iced-rs"]
+
+[agent-guidance]
+rust = "Use for Rust work."
+"#;
+        let config: ProjectConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.guidance_for("rust"), Some("Use for Rust work."));
+        // custom_skills is empty — [agent-skills] is a different section
+        assert!(config.custom_skills.is_empty());
     }
 }

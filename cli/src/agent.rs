@@ -189,6 +189,38 @@ pub fn match_hooks<'a>(
         .collect()
 }
 
+/// Per-agent customization from project-level config
+#[derive(Debug, Clone, Default)]
+pub struct AgentExtras {
+    pub guidance: Option<String>,
+    pub instructions: Option<String>,
+}
+
+/// Generate a "When to Use" markdown section
+pub fn guidance_section(text: Option<&str>) -> String {
+    match text {
+        Some(t) if !t.is_empty() => format!("## When to Use\n\n{}\n\n", t.trim()),
+        _ => String::new(),
+    }
+}
+
+/// Generate an "Additional Instructions" markdown section
+pub fn instructions_section(text: Option<&str>) -> String {
+    match text {
+        Some(t) if !t.is_empty() => format!("## Additional Instructions\n\n{}\n", t.trim()),
+        _ => String::new(),
+    }
+}
+
+/// Append a section to the end of a markdown body
+pub fn append_section(body: &str, section: &str) -> String {
+    if section.is_empty() {
+        return body.to_string();
+    }
+    let trimmed = body.trim_end();
+    format!("{}\n\n{}\n", trimmed, section.trim_end())
+}
+
 /// Generate a "Load These Skills" markdown section
 pub fn load_skills_section(skills: &[(String, String)]) -> String {
     if skills.is_empty() {
@@ -372,5 +404,46 @@ Does testing things.
                 .contains("**Architecture patterns for Rust. More details here.** → `rust-arch`")
         );
         assert!(section.contains("**GitHub CLI integration** → `github`"));
+    }
+
+    #[test]
+    fn guidance_section_renders() {
+        let section = guidance_section(Some("Use for backend Rust services."));
+        assert!(section.contains("## When to Use"));
+        assert!(section.contains("Use for backend Rust services."));
+    }
+
+    #[test]
+    fn guidance_section_empty_on_none() {
+        assert_eq!(guidance_section(None), String::new());
+        assert_eq!(guidance_section(Some("")), String::new());
+    }
+
+    #[test]
+    fn instructions_section_renders() {
+        let section = instructions_section(Some("Always run clippy."));
+        assert!(section.contains("## Additional Instructions"));
+        assert!(section.contains("Always run clippy."));
+    }
+
+    #[test]
+    fn instructions_section_empty_on_none() {
+        assert_eq!(instructions_section(None), String::new());
+        assert_eq!(instructions_section(Some("")), String::new());
+    }
+
+    #[test]
+    fn append_section_adds_to_end() {
+        let body = "# Title\n\nSome content.\n";
+        let section = "## Extra\n\nMore stuff.\n";
+        let result = append_section(body, section);
+        assert!(result.ends_with("More stuff.\n"));
+        assert!(result.contains("Some content."));
+    }
+
+    #[test]
+    fn append_section_noop_when_empty() {
+        let body = "# Title\n\nContent.\n";
+        assert_eq!(append_section(body, ""), body.to_string());
     }
 }

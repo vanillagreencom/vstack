@@ -12,6 +12,7 @@ pub fn generate_agent(
     dir: &Path,
     skills: &[(String, String)],
     _hooks: &[Hook],
+    extras: &agent::AgentExtras,
 ) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
 
@@ -26,8 +27,12 @@ pub fn generate_agent(
     output.push_str("alwaysApply: false\n");
     output.push_str("---\n\n");
 
+    let guidance = agent::guidance_section(extras.guidance.as_deref());
     let skills_section = agent::load_skills_section(skills);
-    let body = agent::insert_after_intro(&agent.body, &skills_section);
+    let combined = format!("{}{}", guidance, skills_section);
+    let body = agent::insert_after_intro(&agent.body, &combined);
+    let instructions = agent::instructions_section(extras.instructions.as_deref());
+    let body = agent::append_section(&body, &instructions);
     output.push_str(&body);
 
     if !output.ends_with('\n') {

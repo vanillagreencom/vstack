@@ -266,6 +266,7 @@ pub fn run(
 
     let source_dir = resolved_source.dir.clone();
     let mapping = crate::mapping::MappingConfig::load(&source_dir);
+    let project_config = crate::mapping::ProjectConfig::load(&config::project_root());
 
     if global {
         let unsupported: Vec<Harness> = harnesses
@@ -322,7 +323,7 @@ pub fn run(
             let available_skill_names: Vec<String> =
                 selected_skills.iter().map(|s| s.name.clone()).collect();
             let matched = mapping.skills_for_agent(&a.name, &a.role, &available_skill_names);
-            let skill_pairs: Vec<(String, String)> = matched
+            let mut skill_pairs: Vec<(String, String)> = matched
                 .iter()
                 .filter_map(|name| {
                     selected_skills
@@ -332,6 +333,13 @@ pub fn run(
                 })
                 .collect();
 
+            // Merge custom skills from project config
+            for cs in project_config.custom_skills_for(&a.name) {
+                if !skill_pairs.iter().any(|(n, _)| *n == cs.0) {
+                    skill_pairs.push(cs);
+                }
+            }
+
             // Compute matched hooks
             let matched_hooks: Vec<hook::Hook> = mapping
                 .hooks_for_agent(&a.role, &selected_hooks)
@@ -339,8 +347,20 @@ pub fn run(
                 .cloned()
                 .collect();
 
-            let result =
-                installer::install_agent(a, *harness, global, &skill_pairs, &matched_hooks)?;
+            // Build per-agent extras from project config
+            let extras = crate::agent::AgentExtras {
+                guidance: project_config.guidance_for(&a.name).map(String::from),
+                instructions: project_config.instructions_for(&a.name).map(String::from),
+            };
+
+            let result = installer::install_agent(
+                a,
+                *harness,
+                global,
+                &skill_pairs,
+                &matched_hooks,
+                &extras,
+            )?;
             log_lines.push(result.detail.clone());
             results.push(result);
         }
@@ -641,6 +661,7 @@ fn reconcile_agents(
     let lock_path = config::lock_file_path(global);
     let lock = config::LockFile::load(&lock_path)?;
     let mapping = crate::mapping::MappingConfig::load(source_dir);
+    let project_config = crate::mapping::ProjectConfig::load(&config::project_root());
 
     // Collect all installed skill names
     let installed_skills: Vec<String> = lock
@@ -677,7 +698,7 @@ fn reconcile_agents(
 
         let matched_skill_names =
             mapping.skills_for_agent(&agent.name, &agent.role, &installed_skills);
-        let skill_pairs: Vec<(String, String)> = matched_skill_names
+        let mut skill_pairs: Vec<(String, String)> = matched_skill_names
             .iter()
             .filter_map(|sname| {
                 source_skills
@@ -687,18 +708,38 @@ fn reconcile_agents(
             })
             .collect();
 
+        // Merge custom skills from project config
+        for cs in project_config.custom_skills_for(&agent.name) {
+            if !skill_pairs.iter().any(|(n, _)| *n == cs.0) {
+                skill_pairs.push(cs);
+            }
+        }
+
         let matched_hooks: Vec<crate::hook::Hook> = mapping
             .hooks_for_agent(&agent.role, &source_hooks)
             .into_iter()
             .cloned()
             .collect();
 
+        let extras = crate::agent::AgentExtras {
+            guidance: project_config.guidance_for(&agent.name).map(String::from),
+            instructions: project_config
+                .instructions_for(&agent.name)
+                .map(String::from),
+        };
+
         // Regenerate for each harness this agent is installed to
         for harness_id in &entry.harnesses {
             if let Some(harness) = Harness::from_id(harness_id) {
                 // Only reconcile harnesses that were part of this install
                 if harnesses.contains(&harness) {
-                    let _ = harness.generate_agent(agent, global, &skill_pairs, &matched_hooks);
+                    let _ = harness.generate_agent(
+                        agent,
+                        global,
+                        &skill_pairs,
+                        &matched_hooks,
+                        &extras,
+                    );
                 }
             }
         }

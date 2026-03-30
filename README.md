@@ -123,6 +123,28 @@ engineer = ["issue-lifecycle", "github", "worktree"]
 "PostToolUse:Edit|Write" = ["engineer"]
 ```
 
+### Project Customization
+
+The target project's `vstack.toml` can include per-agent customization that survives updates:
+
+```toml
+# Attach local skills to agents
+[custom-skills]
+rust = [
+  { name = "my-testing", description = "Custom integration testing patterns" },
+]
+
+# "When to Use" guidance (injected after agent intro)
+[agent-guidance]
+rust = "Use when working on backend Rust services."
+
+# Additional instructions (appended at the bottom of agent files)
+[agent-instructions]
+rust = "Always run clippy before committing."
+```
+
+These sections are re-applied on every `vstack add`, so they are never overwritten by upstream skill/agent updates.
+
 ### Architecture
 
 ```text

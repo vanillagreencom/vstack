@@ -90,6 +90,29 @@ reviewer = ["issue-lifecycle"]
 "PostCompact:" = "all"
 ```
 
+### Project customization (`vstack.toml` at project root)
+
+The same `vstack.toml` (or a separate one in the target project) can include per-agent customization sections. These survive `vstack add` updates — they are re-applied from config on every install/reconciliation.
+
+```toml
+# Attach local skills to agents (name + description shown in "Load These Skills")
+[custom-skills]
+rust = [
+  { name = "my-testing", description = "Custom integration testing patterns" },
+]
+
+# "When to Use" guidance injected after the agent intro
+[agent-guidance]
+rust = "Use when working on backend Rust services and performance-critical code paths."
+
+# Additional instructions appended at the bottom of the agent file
+[agent-instructions]
+rust = """
+Always run clippy before committing.
+Prefer zero-copy APIs in hot paths.
+"""
+```
+
 ## Per-Harness Model Mapping
 
 | Canonical | Claude Code | OpenCode | Codex |
