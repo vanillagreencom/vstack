@@ -166,7 +166,7 @@ pub fn run(
         };
 
         let total = agents.len() + skills.len() + hooks.len();
-        if total == 0 {
+        if total == 0 && (yes || all || harness_filter.is_some()) {
             eprintln!(
                 "No agents, skills, or hooks found in {}",
                 source_dir.display()
