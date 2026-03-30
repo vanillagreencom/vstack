@@ -133,14 +133,23 @@ impl ProjectConfig {
     }
 }
 
-/// Create vstack.toml at the project root if it doesn't exist.
-/// Generates commented-out placeholders for each installed agent and skill.
+/// Create or update vstack.toml at the project root.
+///
+/// - If the file doesn't exist, generates a full template with commented placeholders.
+/// - If the file exists, appends commented placeholders for any new agents/skills
+///   not already mentioned, and updates the installed-skills reference block.
+///   Never modifies existing user content.
 pub fn ensure_project_config(project_root: &Path, agents: &[String], skills: &[String]) {
     let path = project_root.join("vstack.toml");
-    if path.exists() {
-        return;
-    }
 
+    if path.exists() {
+        update_project_config(&path, agents, skills);
+    } else {
+        create_project_config(&path, agents, skills);
+    }
+}
+
+fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     let mut out = String::from(
         "# vstack.toml — project-level agent customization\n\
          #\n\
@@ -152,10 +161,15 @@ pub fn ensure_project_config(project_root: &Path, agents: &[String], skills: &[S
     );
 
     // [agent-guidance]
-    out.push_str("# When to use each agent — appears near the top of the generated agent file.\n");
+    out.push_str(
+        "# When to use each agent — appears near the top of the generated agent file.\n",
+    );
     out.push_str("# [agent-guidance]\n");
     for name in agents {
-        out.push_str(&format!("# {} = \"When to use this agent in your project.\"\n", name));
+        out.push_str(&format!(
+            "# {} = \"When to use this agent in your project.\"\n",
+            name
+        ));
     }
     if agents.is_empty() {
         out.push_str("# my-agent = \"When to use this agent in your project.\"\n");
@@ -166,7 +180,10 @@ pub fn ensure_project_config(project_root: &Path, agents: &[String], skills: &[S
     out.push_str("# Additional instructions appended to the bottom of each agent file.\n");
     out.push_str("# [agent-instructions]\n");
     for name in agents {
-        out.push_str(&format!("# {} = \"Project-specific rules for this agent.\"\n", name));
+        out.push_str(&format!(
+            "# {} = \"Project-specific rules for this agent.\"\n",
+            name
+        ));
     }
     if agents.is_empty() {
         out.push_str("# my-agent = \"Project-specific rules for this agent.\"\n");
@@ -186,7 +203,63 @@ pub fn ensure_project_config(project_root: &Path, agents: &[String], skills: &[S
         out.push_str("# my-agent = [\n#   { name = \"my-skill\", description = \"What this skill does\" },\n# ]\n");
     }
 
-    // Reference: installed skills
+    append_skills_reference(&mut out, skills);
+    let _ = std::fs::write(path, out);
+}
+
+fn update_project_config(path: &Path, agents: &[String], skills: &[String]) {
+    let Ok(existing) = std::fs::read_to_string(path) else {
+        return;
+    };
+
+    let mut additions = String::new();
+
+    // Find agents not already mentioned as a TOML key (commented or active).
+    // Match `name =` or `name=` patterns to avoid false positives from partial
+    // matches (e.g., agent "rust" matching "rust-arch").
+    let new_agents: Vec<&String> = agents
+        .iter()
+        .filter(|name| {
+            let key_pat = format!("{} =", name);
+            let key_pat2 = format!("{}=", name);
+            let commented_pat = format!("# {} =", name);
+            let commented_pat2 = format!("# {}=", name);
+            !existing.contains(&key_pat)
+                && !existing.contains(&key_pat2)
+                && !existing.contains(&commented_pat)
+                && !existing.contains(&commented_pat2)
+        })
+        .collect();
+
+    if !new_agents.is_empty() {
+        additions.push_str(&format!(
+            "\n# New agents added — uncomment to customize:\n"
+        ));
+        for name in &new_agents {
+            additions.push_str(&format!(
+                "# [agent-guidance]\n# {} = \"When to use this agent in your project.\"\n",
+                name
+            ));
+            additions.push_str(&format!(
+                "# [agent-instructions]\n# {} = \"Project-specific rules for this agent.\"\n",
+                name
+            ));
+        }
+    }
+
+    // Strip old skills reference block and re-append with current list
+    let content = strip_skills_reference(&existing);
+    let mut out = content.trim_end().to_string();
+    out.push('\n');
+    if !additions.is_empty() {
+        out.push_str(&additions);
+    }
+    append_skills_reference(&mut out, skills);
+
+    let _ = std::fs::write(path, out);
+}
+
+fn append_skills_reference(out: &mut String, skills: &[String]) {
     if !skills.is_empty() {
         out.push('\n');
         out.push_str("# Installed skills (for reference when adding custom-skills above):\n");
@@ -194,8 +267,21 @@ pub fn ensure_project_config(project_root: &Path, agents: &[String], skills: &[S
             out.push_str(&format!("#   - {}\n", name));
         }
     }
+}
 
-    let _ = std::fs::write(&path, out);
+fn strip_skills_reference(content: &str) -> String {
+    // Remove the "# Installed skills..." block — only if it's a trailing comment
+    // block (every line after the marker starts with '#' or is blank).
+    if let Some(pos) = content.find("# Installed skills (for reference") {
+        let after = &content[pos..];
+        let all_comments = after
+            .lines()
+            .all(|line| line.starts_with('#') || line.trim().is_empty());
+        if all_comments {
+            return content[..pos].to_string();
+        }
+    }
+    content.to_string()
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -521,5 +607,92 @@ rust = "Use for Rust work."
         assert_eq!(config.guidance_for("rust"), Some("Use for Rust work."));
         // custom_skills is empty — [agent-skills] is a different section
         assert!(config.custom_skills.is_empty());
+    }
+
+    #[test]
+    fn update_project_config_appends_new_agents() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_test_update_config_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("vstack.toml");
+
+        // Create initial config with "rust" agent
+        create_project_config(&path, &["rust".into()], &["rust-arch".into()]);
+        let initial = std::fs::read_to_string(&path).unwrap();
+        assert!(initial.contains("# rust ="));
+        assert!(initial.contains("#   - rust-arch"));
+
+        // Update with "rust" + new "iced" agent and new skill
+        update_project_config(&path, &["rust".into(), "iced".into()], &["rust-arch".into(), "trading-design".into()]);
+        let updated = std::fs::read_to_string(&path).unwrap();
+
+        // Original rust placeholders preserved
+        assert!(updated.contains("# rust ="));
+        // New iced agent added
+        assert!(updated.contains("# iced ="));
+        // Skills reference updated
+        assert!(updated.contains("#   - trading-design"));
+        // Old skills still listed
+        assert!(updated.contains("#   - rust-arch"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_project_config_preserves_user_edits() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_test_preserve_edits_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("vstack.toml");
+
+        // Simulate user-edited file with active (uncommented) config
+        let user_content = r#"[agent-guidance]
+rust = "Use for my backend services."
+
+[agent-instructions]
+rust = "Always use thiserror for errors."
+"#;
+        std::fs::write(&path, user_content).unwrap();
+
+        // Update with rust (already present) + new iced
+        update_project_config(&path, &["rust".into(), "iced".into()], &["trading-design".into()]);
+        let updated = std::fs::read_to_string(&path).unwrap();
+
+        // User content preserved
+        assert!(updated.contains("rust = \"Use for my backend services.\""));
+        assert!(updated.contains("rust = \"Always use thiserror for errors.\""));
+        // New agent added as comment
+        assert!(updated.contains("# iced ="));
+        // Rust not duplicated (already in file as active key)
+        assert!(!updated.contains("# New agents") || !updated.contains("# rust ="));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_project_config_no_change_when_all_present() {
+        let dir = std::env::temp_dir().join(format!(
+            "vstack_test_no_change_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("vstack.toml");
+
+        create_project_config(&path, &["rust".into()], &["rust-arch".into()]);
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        // Same agents/skills — should not add "New agents" section
+        update_project_config(&path, &["rust".into()], &["rust-arch".into()]);
+        let after = std::fs::read_to_string(&path).unwrap();
+
+        assert!(!after.contains("# New agents added"));
+        // Content should be essentially the same (skills ref regenerated but identical)
+        assert_eq!(before.trim(), after.trim());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
