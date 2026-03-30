@@ -165,8 +165,9 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
 
     // ── agent-guidance ──
     out.push_str("\n# ── When to Use ──────────────────────────────────────\n");
-    out.push_str("# Guidance shown near the top of each agent file.\n");
-    out.push_str("# Helps the AI (or user) decide which agent to pick.\n");
+    out.push_str("# Adds a \"## When to Use\" section in each agent file,\n");
+    out.push_str("# after the agent's built-in description. Tells the\n");
+    out.push_str("# AI when to pick this agent for your project.\n");
     out.push_str("#\n");
     out.push_str("# [agent-guidance]\n");
     for name in agents {
@@ -178,8 +179,9 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
 
     // ── agent-instructions ──
     out.push_str("\n\n# ── Additional Instructions ──────────────────────────\n");
-    out.push_str("# Appended to the bottom of each agent file.\n");
-    out.push_str("# Project-specific rules, conventions, or reminders.\n");
+    out.push_str("# Adds a \"## Additional Instructions\" section at the\n");
+    out.push_str("# bottom of each agent file. Project-specific rules,\n");
+    out.push_str("# conventions, or reminders for this agent.\n");
     out.push_str("#\n");
     out.push_str("# [agent-instructions]\n");
     for name in agents {
