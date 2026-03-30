@@ -188,18 +188,24 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     // ── custom-skills ──
     out.push_str("\n\n# ── Custom Skills ────────────────────────────────────\n");
     out.push_str("# Attach extra skills to agents beyond automatic\n");
-    out.push_str("# prefix matching. Each entry is a list of\n");
-    out.push_str("# { name, description } objects.\n");
+    out.push_str("# prefix matching. Each entry needs a name and\n");
+    out.push_str("# description:\n");
+    out.push_str("#   { name = \"my-skill\", description = \"What it does\" }\n");
     out.push_str("#\n");
-    out.push_str("# [custom-skills]\n");
-    if !agents.is_empty() {
-        out.push_str(&format!(
-            "# {} = [\n#   {{ name = \"my-skill\", description = \"What this skill does\" }},\n# ]\n",
-            agents[0]
-        ));
-    } else {
-        out.push_str("# my-agent = [\n#   { name = \"my-skill\", description = \"What this skill does\" },\n# ]\n");
+    out.push_str("[custom-skills]\n");
+    for name in agents {
+        out.push_str(&format!("{} = []\n", name));
     }
+
+    // ── custom-hooks ──
+    out.push_str("\n\n# ── Custom Hooks ─────────────────────────────────────\n");
+    out.push_str("# Project-local hooks not from the vstack source repo.\n");
+    out.push_str("# Each hook needs: event, command, and optional matcher.\n");
+    out.push_str("#\n");
+    out.push_str("# [[custom-hooks]]\n");
+    out.push_str("# event = \"PreToolUse\"      # PreToolUse | PostToolUse | PostCompact | TaskCompleted\n");
+    out.push_str("# matcher = \"Bash\"           # optional: Bash | Edit|Write | (omit for all)\n");
+    out.push_str("# command = \"./scripts/my-hook.sh\"\n");
 
     append_skills_reference(&mut out, skills);
     let _ = std::fs::write(path, out);
@@ -662,7 +668,7 @@ rust = "Use for Rust work."
         // Create initial config with "rust" agent
         create_project_config(&path, &["rust".into()], &["rust-arch".into()]);
         let initial = std::fs::read_to_string(&path).unwrap();
-        assert!(initial.contains("# rust ="));
+        assert!(initial.contains("rust = \"\""));
         assert!(initial.contains("#   rust-arch"));
 
         // Update with "rust" + new "iced" agent and new skill
@@ -674,7 +680,7 @@ rust = "Use for Rust work."
         let updated = std::fs::read_to_string(&path).unwrap();
 
         // Original rust placeholders preserved
-        assert!(updated.contains("# rust ="));
+        assert!(updated.contains("rust = \"\""));
         // New iced agent added (uncommented, empty value)
         assert!(updated.contains("iced = \"\""));
         // Skills reference updated
@@ -719,7 +725,7 @@ rust = "Always use thiserror for errors."
         // Rust not duplicated
         let iced_section = updated.find("iced = \"\"").unwrap();
         assert!(
-            !updated[iced_section..].contains("# rust ="),
+            !updated[iced_section..].contains("rust = \"\""),
             "rust should not appear in new agents section"
         );
 
