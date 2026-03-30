@@ -242,9 +242,13 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     // ── custom-skills ──
     out.push_str("\n\n# ── Custom Skills ────────────────────────────────────\n");
     out.push_str("# Attach extra skills to agents beyond automatic\n");
-    out.push_str("# prefix matching. Each entry needs a name and\n");
-    out.push_str("# description:\n");
-    out.push_str("#   { name = \"my-skill\", description = \"What it does\" }\n");
+    out.push_str("# prefix matching. Add entries like:\n");
+    out.push_str("#\n");
+    out.push_str("#   my-agent = [\n");
+    out.push_str("#     { name = \"my-skill\", description = \"What it does\" },\n");
+    out.push_str("#   ]\n");
+    out.push_str("#\n");
+    out.push_str("# Leave empty [] for no extra skills.\n");
     out.push_str("#\n");
     out.push_str("[custom-skills]\n");
     for name in agents {
