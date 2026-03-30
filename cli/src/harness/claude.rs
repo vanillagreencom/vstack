@@ -66,55 +66,7 @@ pub fn generate_agent(
     Ok(path)
 }
 
-/// Format hooks into Claude Code YAML frontmatter format.
-///
-/// Groups hooks by event, then by matcher:
-/// ```yaml
-/// hooks:
-///   PreToolUse:
-///     - matcher: Bash
-///       hooks:
-///         - type: command
-///           command: ".claude/hooks/block-bare-cd.sh"
-/// ```
-fn format_hooks_yaml(hooks: &[Hook]) -> String {
-    // Group by event → matcher → list of hooks
-    let mut by_event: BTreeMap<&str, BTreeMap<Option<&str>, Vec<&Hook>>> = BTreeMap::new();
-
-    for hook in hooks {
-        by_event
-            .entry(&hook.event)
-            .or_default()
-            .entry(hook.matcher.as_deref())
-            .or_default()
-            .push(hook);
-    }
-
-    let mut yaml = String::from("hooks:\n");
-
-    for (event, matchers) in &by_event {
-        yaml.push_str(&format!("  {}:\n", event));
-        for (matcher, hook_list) in matchers {
-            if let Some(m) = matcher {
-                yaml.push_str(&format!("    - matcher: {}\n", m));
-            } else {
-                yaml.push_str("    - matcher: \"*\"\n");
-            }
-            yaml.push_str("      hooks:\n");
-            for h in hook_list {
-                yaml.push_str("        - type: command\n");
-                yaml.push_str(&format!(
-                    "          command: \".claude/hooks/{}.sh\"\n",
-                    h.name
-                ));
-            }
-        }
-    }
-
-    yaml
-}
-
-/// Format both installed hooks and custom hooks into Claude Code YAML frontmatter.
+/// Format installed hooks and custom hooks into Claude Code YAML frontmatter.
 fn format_hooks_yaml_with_custom(
     hooks: &[Hook],
     custom: &[agent::CustomHookEntry],
