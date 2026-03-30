@@ -657,7 +657,7 @@ fn draw_help(frame: &mut Frame, area: Rect, select: &TabbedSelect) {
     frame.render_widget(help, area);
 }
 
-pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize) {
+pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize) -> usize {
     let area = frame.area();
     frame.render_widget(
         Block::default().style(Style::default().bg(Color::Black)),
@@ -855,7 +855,8 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
     // Render scrollable items
     let visible = chunks[4].height as usize;
     let total = all_lines.len();
-    let sc = scroll.min(total.saturating_sub(1));
+    let max_scroll = total.saturating_sub(visible);
+    let sc = scroll.min(max_scroll);
     let end = (sc + visible).min(total);
     let visible_items: Vec<ListItem> = all_lines[sc..end]
         .iter()
@@ -877,6 +878,8 @@ pub fn draw_summary(frame: &mut Frame, data: &super::SummaryData, scroll: usize)
     let help = Paragraph::new(Line::from(help_spans))
         .block(Block::default().padding(Padding::horizontal(1)));
     frame.render_widget(help, chunks[5]);
+
+    max_scroll
 }
 
 fn section_header<'a>(title: &str, width: usize) -> Line<'a> {

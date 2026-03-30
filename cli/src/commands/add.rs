@@ -479,7 +479,7 @@ pub fn run(
             }
             if !global && !selected_agents.is_empty() {
                 notes.push(
-                    "Customize agents in vstack.toml, then run `vstack refresh`".into(),
+                    "Add per-agent guidance or instructions in vstack.toml, then run `vstack refresh` to apply".into(),
                 );
             }
             notes
@@ -520,7 +520,7 @@ pub fn run(
             harness_names.join(", ")
         );
         if !global && !selected_agents.is_empty() {
-            eprintln!("  Customize agents in vstack.toml, then run `vstack refresh`");
+            eprintln!("  Add per-agent guidance or instructions in vstack.toml, then run `vstack refresh` to apply");
         }
         // Check for CLI updates in non-interactive mode
         crate::commands::update::check_update_hint();
