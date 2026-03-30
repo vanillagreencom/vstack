@@ -61,6 +61,108 @@ impl ProjectConfig {
     pub fn instructions_for(&self, agent_name: &str) -> Option<&str> {
         self.agent_instructions.get(agent_name).map(|s| s.as_str())
     }
+
+    /// Merge extracted agent sections into vstack.toml, preserving existing entries.
+    /// Only writes new entries — never overwrites user-set values.
+    pub fn save_extracted(
+        &mut self,
+        project_root: &Path,
+        agent_name: &str,
+        extracted: &crate::agent::AgentExtras,
+    ) {
+        let needs_guidance =
+            extracted.guidance.is_some() && self.guidance_for(agent_name).is_none();
+        let needs_instructions =
+            extracted.instructions.is_some() && self.instructions_for(agent_name).is_none();
+
+        if !needs_guidance && !needs_instructions {
+            return;
+        }
+
+        if let Some(ref text) = extracted.guidance {
+            if needs_guidance {
+                self.agent_guidance
+                    .insert(agent_name.to_string(), text.clone());
+            }
+        }
+        if let Some(ref text) = extracted.instructions {
+            if needs_instructions {
+                self.agent_instructions
+                    .insert(agent_name.to_string(), text.clone());
+            }
+        }
+
+        // Write back to vstack.toml using toml::Value to preserve structure
+        let path = project_root.join("vstack.toml");
+        let mut doc: toml::Value = if path.exists() {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|c| toml::from_str(&c).ok())
+                .unwrap_or(toml::Value::Table(Default::default()))
+        } else {
+            toml::Value::Table(Default::default())
+        };
+
+        let table = doc.as_table_mut().unwrap();
+
+        if needs_guidance {
+            if let Some(ref text) = extracted.guidance {
+                let section = table
+                    .entry("agent-guidance")
+                    .or_insert_with(|| toml::Value::Table(Default::default()));
+                if let Some(t) = section.as_table_mut() {
+                    t.entry(agent_name)
+                        .or_insert_with(|| toml::Value::String(text.clone()));
+                }
+            }
+        }
+
+        if needs_instructions {
+            if let Some(ref text) = extracted.instructions {
+                let section = table
+                    .entry("agent-instructions")
+                    .or_insert_with(|| toml::Value::Table(Default::default()));
+                if let Some(t) = section.as_table_mut() {
+                    t.entry(agent_name)
+                        .or_insert_with(|| toml::Value::String(text.clone()));
+                }
+            }
+        }
+
+        let _ = std::fs::write(&path, toml::to_string_pretty(&doc).unwrap_or_default());
+    }
+}
+
+const PROJECT_CONFIG_TEMPLATE: &str = r#"# vstack.toml — project-level agent customization
+#
+# Customize agent behavior for this project. These settings are merged
+# into generated agent files each time agents are installed or refreshed.
+#
+# After editing this file, run `vstack refresh` (or press 'f' in the
+# vstack TUI Installed tab) to regenerate agent files with your changes.
+
+# When to use each agent — appears near the top of the generated agent file.
+# [agent-guidance]
+# rust = "Use for backend API services and CLI tools in this project."
+
+# Additional instructions appended to the bottom of each agent file.
+# [agent-instructions]
+# rust = "Always run `cargo clippy` before committing. Use the project's custom error type."
+
+# Extra skills to attach to specific agents (beyond automatic prefix matching).
+# [custom-skills]
+# rust = [
+#   { name = "my-skill", description = "Project-specific testing skill" },
+# ]
+"#;
+
+/// Create vstack.toml at the project root if it doesn't exist.
+pub fn ensure_project_config(project_root: &Path) {
+    let path = project_root.join("vstack.toml");
+    if path.exists() {
+        return;
+    }
+    let _ = std::fs::write(&path, PROJECT_CONFIG_TEMPLATE);
 }
 
 #[derive(Debug, Default, Deserialize)]

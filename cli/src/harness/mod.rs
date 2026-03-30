@@ -197,6 +197,15 @@ impl Harness {
         paths
     }
 
+    /// Filename for a generated agent in this harness
+    pub fn agent_filename(&self, name: &str) -> String {
+        match self {
+            Harness::ClaudeCode | Harness::OpenCode => format!("{name}.md"),
+            Harness::Cursor => format!("{name}.mdc"),
+            Harness::Codex => format!("{name}.toml"),
+        }
+    }
+
     /// Generate a harness-specific agent file and return the output path
     pub fn generate_agent(
         &self,

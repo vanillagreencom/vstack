@@ -221,6 +221,43 @@ pub fn append_section(body: &str, section: &str) -> String {
     format!("{}\n\n{}\n", trimmed, section.trim_end())
 }
 
+/// Extract user-edited "When to Use" and "Additional Instructions" sections
+/// from an existing generated agent file so they can be preserved across regeneration.
+pub fn extract_user_sections(content: &str) -> AgentExtras {
+    AgentExtras {
+        guidance: extract_section(content, "## When to Use"),
+        instructions: extract_section(content, "## Additional Instructions"),
+    }
+}
+
+/// Extract a markdown section's body text between its heading and the next `## ` heading.
+fn extract_section(content: &str, header: &str) -> Option<String> {
+    let start = content.find(header)?;
+    let after_header = &content[start + header.len()..];
+    // Find the body text (skip leading whitespace)
+    let trimmed = after_header.trim_start();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // End at next ## heading or end of content
+    let end = trimmed.find("\n## ").unwrap_or(trimmed.len());
+    let text = trimmed[..end].trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+/// Extract the developer_instructions body from a Codex TOML agent file.
+pub fn extract_body_from_codex_toml(content: &str) -> Option<String> {
+    let marker = "developer_instructions = '''\n";
+    let start = content.find(marker)?;
+    let after = &content[start + marker.len()..];
+    let end = after.find("'''")?;
+    Some(after[..end].to_string())
+}
+
 /// Generate a "Load These Skills" markdown section
 pub fn load_skills_section(skills: &[(String, String)]) -> String {
     if skills.is_empty() {
@@ -445,5 +482,59 @@ Does testing things.
     fn append_section_noop_when_empty() {
         let body = "# Title\n\nContent.\n";
         assert_eq!(append_section(body, ""), body.to_string());
+    }
+
+    #[test]
+    fn extract_user_sections_both() {
+        let content = r#"# Agent
+
+Some intro.
+
+## When to Use
+
+Use for backend services.
+
+## Load These Skills
+
+- **Skill** → `skill-name`
+
+## Capabilities
+
+Does stuff.
+
+## Additional Instructions
+
+Always run clippy.
+"#;
+        let extras = extract_user_sections(content);
+        assert_eq!(extras.guidance.as_deref(), Some("Use for backend services."));
+        assert_eq!(
+            extras.instructions.as_deref(),
+            Some("Always run clippy.")
+        );
+    }
+
+    #[test]
+    fn extract_user_sections_none() {
+        let content = "# Agent\n\nJust an intro.\n\n## Capabilities\n\nDoes stuff.\n";
+        let extras = extract_user_sections(content);
+        assert!(extras.guidance.is_none());
+        assert!(extras.instructions.is_none());
+    }
+
+    #[test]
+    fn extract_body_from_codex() {
+        let content = r#"name = "rust"
+developer_instructions = '''
+# Rust Agent
+
+## Additional Instructions
+
+Use zero-copy APIs.
+'''
+"#;
+        let body = extract_body_from_codex_toml(content).unwrap();
+        let extras = extract_user_sections(&body);
+        assert_eq!(extras.instructions.as_deref(), Some("Use zero-copy APIs."));
     }
 }

@@ -266,7 +266,13 @@ pub fn run(
 
     let source_dir = resolved_source.dir.clone();
     let mapping = crate::mapping::MappingConfig::load(&source_dir);
-    let project_config = crate::mapping::ProjectConfig::load(&config::project_root());
+
+    // Ensure project-level vstack.toml exists for customization
+    if !global {
+        crate::mapping::ensure_project_config(&config::project_root());
+    }
+
+    let mut project_config = crate::mapping::ProjectConfig::load(&config::project_root());
 
     if global {
         let unsupported: Vec<Harness> = harnesses
@@ -347,10 +353,23 @@ pub fn run(
                 .cloned()
                 .collect();
 
-            // Build per-agent extras from project config
+            // Extract user sections from existing file before overwriting
+            let existing_path = harness
+                .agents_dir(global)
+                .join(harness.agent_filename(&a.name));
+            let file_extras = read_existing_extras(&existing_path, *harness);
+            project_config.save_extracted(&config::project_root(), &a.name, &file_extras);
+
+            // Build per-agent extras from project config (toml wins, file is fallback)
             let extras = crate::agent::AgentExtras {
-                guidance: project_config.guidance_for(&a.name).map(String::from),
-                instructions: project_config.instructions_for(&a.name).map(String::from),
+                guidance: project_config
+                    .guidance_for(&a.name)
+                    .or(file_extras.guidance.as_deref())
+                    .map(String::from),
+                instructions: project_config
+                    .instructions_for(&a.name)
+                    .or(file_extras.instructions.as_deref())
+                    .map(String::from),
             };
 
             let result = installer::install_agent(
@@ -443,30 +462,25 @@ pub fn run(
             .collect(),
         updated: updated_names,
         harnesses: harness_names.iter().map(|h| h.to_string()).collect(),
-        notes: if skipped_harnesses.is_empty() {
-            if global {
-                harnesses
-                    .iter()
-                    .flat_map(|h| {
-                        h.summary_paths(true).into_iter().map(move |path| {
-                            format!("{} path: {}", h.name(), config::display_path(&path))
-                        })
-                    })
-                    .collect()
-            } else {
-                Vec::new()
+        notes: {
+            let mut notes = Vec::new();
+            if !skipped_harnesses.is_empty() {
+                notes.push(format!(
+                    "Skipped project-only harnesses: {}. Rerun from the target project directory to install those.",
+                    skipped_harnesses.join(", ")
+                ));
             }
-        } else {
-            let mut notes = vec![format!(
-                "Skipped project-only harnesses: {}. Rerun from the target project directory to install those.",
-                skipped_harnesses.join(", ")
-            )];
             if global {
                 notes.extend(harnesses.iter().flat_map(|h| {
                     h.summary_paths(true).into_iter().map(move |path| {
                         format!("{} path: {}", h.name(), config::display_path(&path))
                     })
                 }));
+            }
+            if !global && !selected_agents.is_empty() {
+                notes.push(
+                    "Customize agents in vstack.toml, then run `vstack refresh`".into(),
+                );
             }
             notes
         },
@@ -505,6 +519,9 @@ pub fn run(
             scope,
             harness_names.join(", ")
         );
+        if !global && !selected_agents.is_empty() {
+            eprintln!("  Customize agents in vstack.toml, then run `vstack refresh`");
+        }
         // Check for CLI updates in non-interactive mode
         crate::commands::update::check_update_hint();
     }
@@ -663,7 +680,7 @@ fn reconcile_agents(
     let lock_path = config::lock_file_path(global);
     let lock = config::LockFile::load(&lock_path)?;
     let mapping = crate::mapping::MappingConfig::load(source_dir);
-    let project_config = crate::mapping::ProjectConfig::load(&config::project_root());
+    let mut project_config = crate::mapping::ProjectConfig::load(&config::project_root());
 
     // Collect all installed skill names
     let installed_skills: Vec<String> = lock
@@ -723,6 +740,23 @@ fn reconcile_agents(
             .cloned()
             .collect();
 
+        // Extract user sections from existing files before overwriting
+        for harness_id in &entry.harnesses {
+            if let Some(harness) = Harness::from_id(harness_id) {
+                if harnesses.contains(&harness) {
+                    let existing_path = harness
+                        .agents_dir(global)
+                        .join(harness.agent_filename(&agent.name));
+                    let file_extras = read_existing_extras(&existing_path, harness);
+                    project_config.save_extracted(
+                        &config::project_root(),
+                        &agent.name,
+                        &file_extras,
+                    );
+                }
+            }
+        }
+
         let extras = crate::agent::AgentExtras {
             guidance: project_config.guidance_for(&agent.name).map(String::from),
             instructions: project_config
@@ -748,4 +782,19 @@ fn reconcile_agents(
     }
 
     Ok(())
+}
+
+fn read_existing_extras(
+    path: &std::path::Path,
+    harness: Harness,
+) -> crate::agent::AgentExtras {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Default::default();
+    };
+    let body = if matches!(harness, Harness::Codex) {
+        crate::agent::extract_body_from_codex_toml(&content).unwrap_or(content)
+    } else {
+        content
+    };
+    crate::agent::extract_user_sections(&body)
 }
