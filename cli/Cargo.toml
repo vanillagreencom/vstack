@@ -1,6 +1,6 @@
 [package]
 name = "vstack"
-version = "0.10.0"
+version = "0.9.1"
 edition = "2024"
 description = "CLI tool for installing vstack skills and agents across AI coding harnesses"
 license = "MIT"
