@@ -180,6 +180,24 @@ fn resolve_sources(lock: &config::LockFile) -> Vec<PathBuf> {
         }
     }
 
+    // Fallback: try the source registry (cached remote repos)
+    if sources.is_empty() {
+        let reg_path = config::source_registry_path();
+        if let Ok(registry) = config::SourceRegistry::load(&reg_path) {
+            for entry in registry
+                .current
+                .iter()
+                .chain(registry.entries.iter())
+            {
+                if let Some(dir) = resolve_single_source(entry) {
+                    if !sources.contains(&dir) {
+                        sources.push(dir);
+                    }
+                }
+            }
+        }
+    }
+
     sources
 }
 
