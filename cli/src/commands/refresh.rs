@@ -55,6 +55,7 @@ pub fn run(global: bool) -> Result<()> {
 
     // Refresh agents
     let mut agents_refreshed = 0usize;
+    let mut skills_refreshed = 0usize;
     let agent_entries: Vec<_> = lock
         .entries
         .iter()
@@ -113,13 +114,12 @@ pub fn run(global: bool) -> Result<()> {
             if let Some(harness) = Harness::from_id(harness_id) {
                 let _ =
                     harness.generate_agent(agent, global, &skill_pairs, &matched_hooks, &extras);
-                agents_refreshed += 1;
             }
         }
+        agents_refreshed += 1;
     }
 
     // Refresh skills — re-copy from source
-    let mut skills_refreshed = 0usize;
     let skill_entries: Vec<_> = lock
         .entries
         .iter()
@@ -134,9 +134,9 @@ pub fn run(global: bool) -> Result<()> {
         for harness_id in &entry.harnesses {
             if let Some(harness) = Harness::from_id(harness_id) {
                 let _ = installer::install_skill(skill, harness, global, entry.method);
-                skills_refreshed += 1;
             }
         }
+        skills_refreshed += 1;
     }
 
     eprintln!(
