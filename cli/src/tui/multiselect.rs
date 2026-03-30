@@ -11,11 +11,15 @@ pub struct Tab {
 }
 
 /// Action to perform when a confirm dialog is accepted
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum ConfirmAction {
     Proceed,
     UpdateAll,
     UninstallAll,
+    RemoveSource {
+        source: String,
+        packages: Vec<String>,
+    },
 }
 
 /// An item in the multi-select list

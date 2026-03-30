@@ -1362,6 +1362,38 @@ fn run_tabbed_select(
                                     break SelectResult::SwitchSource(source);
                                 }
                             }
+                            KeyCode::Char('x') | KeyCode::Delete => {
+                                if dialog.cursor == add_index {
+                                    // Can't remove the "+ Add" row
+                                } else if let Some(option) = dialog.options.get(dialog.cursor) {
+                                    let source = option.source.clone();
+                                    let label = option.label.clone();
+                                    let packages = packages_from_source(&source);
+                                    select.repo_dialog = None;
+                                    if packages.is_empty() {
+                                        forget_source(select, &source);
+                                        select.flash_message =
+                                            Some(format!("Removed source: {label}"));
+                                        select.open_repo_dialog();
+                                    } else {
+                                        let pkg_list = packages.join(", ");
+                                        let n = packages.len();
+                                        select.confirm_dialog = Some((
+                                            format!(
+                                                "Remove source \"{label}\"?\n\n\
+                                                 {n} package(s) installed from this source:\n\
+                                                 {pkg_list}\n\n\
+                                                 Press enter to uninstall and remove, or esc to cancel."
+                                            ),
+                                            multiselect::ConfirmAction::RemoveSource {
+                                                source,
+                                                packages,
+                                            },
+                                        ));
+                                        select.confirm_dialog_scroll = 0;
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -1445,6 +1477,17 @@ fn run_tabbed_select(
                                     let n = names.len();
                                     remove_installed_items(select, &names);
                                     select.flash_message = Some(format!("Uninstalled {n} item(s)"));
+                                }
+                                multiselect::ConfirmAction::RemoveSource {
+                                    source,
+                                    packages,
+                                } => {
+                                    remove_installed_items(select, &packages);
+                                    forget_source(select, &source);
+                                    let n = packages.len();
+                                    select.flash_message = Some(format!(
+                                        "Removed source and uninstalled {n} package(s)"
+                                    ));
                                 }
                             }
                         }
@@ -1785,6 +1828,34 @@ fn remove_installed_items(select: &mut TabbedSelect, names: &[String]) {
         }
         select.scroll = 0;
     }
+}
+
+/// Get all package names installed from a given source.
+fn packages_from_source(source: &str) -> Vec<String> {
+    let mut packages = Vec::new();
+    for scope_global in [false, true] {
+        let lock_path = crate::config::lock_file_path(scope_global);
+        if let Ok(lock) = crate::config::LockFile::load(&lock_path) {
+            for (name, entry) in &lock.entries {
+                if entry.source == source {
+                    packages.push(name.clone());
+                }
+            }
+        }
+    }
+    packages.sort();
+    packages.dedup();
+    packages
+}
+
+/// Remove a source from the registry and update the source selector.
+fn forget_source(select: &mut TabbedSelect, source: &str) {
+    let reg_path = crate::config::source_registry_path();
+    if let Ok(mut registry) = crate::config::SourceRegistry::load(&reg_path) {
+        registry.forget(source);
+        let _ = registry.save(&reg_path);
+    }
+    select.source_options.retain(|o| o.source != source);
 }
 
 /// Show a post-install summary screen.

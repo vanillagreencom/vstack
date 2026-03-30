@@ -990,7 +990,8 @@ fn draw_repo_dialog(frame: &mut Frame, select: &mut TabbedSelect) {
     };
     let area = frame.area();
     let dialog_width = 56u16.min(area.width.saturating_sub(4));
-    let dialog_height = 12u16.min(area.height.saturating_sub(4));
+    let option_count = dialog.options.len() as u16 + 1; // +1 for "+ Add repo"
+    let dialog_height = (option_count + 7).max(12).min(area.height.saturating_sub(4));
     let dialog_area = Rect::new(
         (area.width.saturating_sub(dialog_width)) / 2,
         (area.height.saturating_sub(dialog_height)) / 2,
@@ -1048,6 +1049,16 @@ fn draw_repo_dialog(frame: &mut Frame, select: &mut TabbedSelect) {
             Style::default().fg(Color::Indexed(45)).bold()
         };
         lines.push(Line::from(Span::styled(" + Add repo by link ", add_style)));
+        lines.push(Line::from(""));
+        let hint_spans = vec![
+            Span::styled("enter", Style::default().fg(Color::Cyan)),
+            Span::styled(" select  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("x", Style::default().fg(Color::Cyan)),
+            Span::styled(" remove  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("esc", Style::default().fg(Color::Cyan)),
+            Span::styled(" close", Style::default().fg(Color::DarkGray)),
+        ];
+        lines.push(Line::from(hint_spans));
         frame.render_widget(Paragraph::new(lines), inner);
     }
 }

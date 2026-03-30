@@ -117,6 +117,13 @@ impl SourceRegistry {
         }
         self.current = Some(source.to_string());
     }
+
+    pub fn forget(&mut self, source: &str) {
+        self.entries.retain(|e| e != source);
+        if self.current.as_deref() == Some(source) {
+            self.current = None;
+        }
+    }
 }
 
 /// Resolve the lock file path based on scope
