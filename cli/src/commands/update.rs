@@ -7,23 +7,19 @@ use std::time::{Duration, Instant};
 const REPO: &str = "vanillagreencom/vstack";
 
 pub fn run() -> Result<()> {
+    let local_version = env!("CARGO_PKG_VERSION");
     let local_hash = env!("VSTACK_GIT_HASH");
 
-    eprintln!("vstack {} ({})", env!("CARGO_PKG_VERSION"), local_hash);
+    eprintln!("vstack {} ({})", local_version, local_hash);
     eprintln!("Checking for updates...");
 
-    // Check latest remote commit
-    match get_remote_hash() {
-        Some(remote_hash) => {
-            if remote_hash.starts_with(local_hash) || local_hash.starts_with(&remote_hash) {
+    match get_remote_version() {
+        Some(remote_version) => {
+            if remote_version == local_version {
                 eprintln!("Already up to date.");
                 return Ok(());
             }
-            eprintln!(
-                "Update available: {} → {}",
-                &local_hash[..7.min(local_hash.len())],
-                &remote_hash[..7.min(remote_hash.len())]
-            );
+            eprintln!("Update available: {} → {}", local_version, remote_version);
         }
         None => {
             eprintln!("Could not check remote version, updating anyway...");
@@ -52,22 +48,23 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// Check latest commit hash on remote main branch
-pub fn get_remote_hash() -> Option<String> {
-    get_remote_hash_inner(None)
+/// Fetch the version string from the remote Cargo.toml (blocking)
+pub fn get_remote_version() -> Option<String> {
+    get_remote_version_inner(None)
 }
 
-pub fn get_remote_hash_with_timeout(timeout: Duration) -> Option<String> {
-    get_remote_hash_inner(Some(timeout))
+/// Fetch the version string from the remote Cargo.toml (with timeout)
+pub fn get_remote_version_with_timeout(timeout: Duration) -> Option<String> {
+    get_remote_version_inner(Some(timeout))
 }
 
-fn get_remote_hash_inner(timeout: Option<Duration>) -> Option<String> {
-    let mut child = Command::new("git")
-        .args([
-            "ls-remote",
-            &format!("https://github.com/{REPO}.git"),
-            "HEAD",
-        ])
+fn get_remote_version_inner(timeout: Option<Duration>) -> Option<String> {
+    let url = format!(
+        "https://raw.githubusercontent.com/{REPO}/main/cli/Cargo.toml"
+    );
+
+    let mut child = Command::new("curl")
+        .args(["-sfL", "--max-time", "5", &url])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -96,22 +93,54 @@ fn get_remote_hash_inner(timeout: Option<Duration>) -> Option<String> {
 
     let mut stdout = String::new();
     child.stdout.take()?.read_to_string(&mut stdout).ok()?;
-    let hash = stdout.split_whitespace().next()?;
-    Some(hash.to_string())
+    parse_cargo_version(&stdout)
 }
 
-/// Check if an update is available (called from other commands)
-pub fn check_update_hint() {
-    let local = env!("VSTACK_GIT_HASH");
+fn parse_cargo_version(cargo_toml: &str) -> Option<String> {
+    for line in cargo_toml.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("version = \"") {
+            return rest.strip_suffix('"').map(String::from);
+        }
+    }
+    None
+}
 
-    // Quick non-blocking check
-    if let Some(remote) = get_remote_hash() {
-        let remote_short = &remote[..7.min(remote.len())];
-        let local_short = &local[..7.min(local.len())];
-        if !remote.starts_with(local) && !local.starts_with(remote_short) {
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_version_from_cargo_toml() {
+        let toml = r#"[package]
+name = "vstack"
+version = "0.9.0"
+edition = "2024"
+"#;
+        assert_eq!(parse_cargo_version(toml), Some("0.9.0".into()));
+    }
+
+    #[test]
+    fn parse_version_missing() {
+        assert_eq!(parse_cargo_version("name = \"vstack\""), None);
+    }
+
+    #[test]
+    fn parse_version_with_prerelease() {
+        let toml = "version = \"1.2.3-beta.1\"";
+        assert_eq!(parse_cargo_version(toml), Some("1.2.3-beta.1".into()));
+    }
+}
+
+/// Check if an update is available (called after non-interactive installs)
+pub fn check_update_hint() {
+    let local = env!("CARGO_PKG_VERSION");
+
+    if let Some(remote) = get_remote_version_with_timeout(Duration::from_millis(1500)) {
+        if remote != local {
             eprintln!(
                 "\n  Update available: {} → {}  (run: vstack update)",
-                local_short, remote_short
+                local, remote
             );
         }
     }

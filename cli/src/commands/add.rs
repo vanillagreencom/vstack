@@ -505,6 +505,8 @@ pub fn run(
             scope,
             harness_names.join(", ")
         );
+        // Check for CLI updates in non-interactive mode
+        crate::commands::update::check_update_hint();
     }
 
     // Run CLI binary update if requested

@@ -4,15 +4,15 @@ use anyhow::Result;
 
 pub fn run() -> Result<()> {
     // Check CLI version
+    let local_version = env!("CARGO_PKG_VERSION");
     let local_hash = env!("VSTACK_GIT_HASH");
-    eprintln!("vstack {} ({})", env!("CARGO_PKG_VERSION"), local_hash);
+    eprintln!("vstack {} ({})", local_version, local_hash);
 
-    if let Some(remote) = crate::commands::update::get_remote_hash() {
-        let remote_short = &remote[..7.min(remote.len())];
-        let local_short = &local_hash[..7.min(local_hash.len())];
-        if !remote.starts_with(local_hash) && !local_hash.starts_with(remote_short) {
+    if let Some(remote_version) = crate::commands::update::get_remote_version() {
+        if remote_version != local_version {
             eprintln!(
-                "  CLI update available: {local_short} → {remote_short}  (run: vstack update)"
+                "  CLI update available: {} → {}  (run: vstack update)",
+                local_version, remote_version
             );
         } else {
             eprintln!("  CLI is up to date.");

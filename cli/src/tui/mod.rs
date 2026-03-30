@@ -1040,17 +1040,12 @@ fn build_item_tabs(
 
 /// Check for CLI binary update (quick, non-blocking)
 fn check_for_update() -> Option<String> {
-    let local = env!("VSTACK_GIT_HASH");
-    let remote = crate::commands::update::get_remote_hash_with_timeout(
-        std::time::Duration::from_millis(250),
+    let local = env!("CARGO_PKG_VERSION");
+    let remote = crate::commands::update::get_remote_version_with_timeout(
+        std::time::Duration::from_millis(1500),
     )?;
-    let remote_short = &remote[..7.min(remote.len())];
-    if !remote.starts_with(local) && !local.starts_with(remote_short) {
-        Some(format!(
-            "{} → {}",
-            &local[..7.min(local.len())],
-            remote_short
-        ))
+    if remote != local {
+        Some(format!("{} → {}", local, remote))
     } else {
         None
     }
