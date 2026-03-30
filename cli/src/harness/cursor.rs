@@ -31,7 +31,9 @@ pub fn generate_agent(
     let skills_section = agent::load_skills_section(skills);
     let combined = format!("{}{}", guidance, skills_section);
     let body = agent::insert_after_intro(&agent.body, &combined);
+    let hooks_prose = agent::custom_hooks_section(&extras.custom_hooks);
     let instructions = agent::instructions_section(extras.instructions.as_deref());
+    let body = agent::append_section(&body, &hooks_prose);
     let body = agent::append_section(&body, &instructions);
     output.push_str(&body);
 

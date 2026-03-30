@@ -51,8 +51,10 @@ pub fn generate_agent(
     let combined = format!("{}{}", guidance, skills_section);
     let body = agent::insert_after_intro(&agent.body, &combined);
 
-    // Append additional instructions at the bottom
+    // Append custom hook descriptions + additional instructions at the bottom
+    let hooks_prose = agent::custom_hooks_section(&extras.custom_hooks);
     let instructions = agent::instructions_section(extras.instructions.as_deref());
+    let body = agent::append_section(&body, &hooks_prose);
     let body = agent::append_section(&body, &instructions);
     output.push_str(&body);
 

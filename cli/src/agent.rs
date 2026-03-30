@@ -204,6 +204,7 @@ pub struct CustomHookEntry {
     pub event: String,
     pub matcher: Option<String>,
     pub command: String,
+    pub description: Option<String>,
 }
 
 /// Generate an "Execute on Launch" markdown section
@@ -268,6 +269,30 @@ pub fn extract_body_from_codex_toml(content: &str) -> Option<String> {
     let after = &content[start + marker.len()..];
     let end = after.find("'''")?;
     Some(after[..end].to_string())
+}
+
+/// Generate a "Safety Hooks" section from custom hooks that have descriptions.
+/// Used by non-Claude-Code harnesses that can't run hook scripts natively.
+pub fn custom_hooks_section(hooks: &[CustomHookEntry]) -> String {
+    let with_desc: Vec<&CustomHookEntry> = hooks.iter().filter(|h| h.description.is_some()).collect();
+    if with_desc.is_empty() {
+        return String::new();
+    }
+    let mut section = String::from("## Safety Hooks\n\n");
+    for hook in with_desc {
+        let matcher_info = hook
+            .matcher
+            .as_deref()
+            .map(|m| format!(" ({})", m))
+            .unwrap_or_default();
+        section.push_str(&format!(
+            "**{}{}**: {}\n\n",
+            hook.event,
+            matcher_info,
+            hook.description.as_deref().unwrap_or("")
+        ));
+    }
+    section
 }
 
 /// Generate a "Load These Skills" markdown section
