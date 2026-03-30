@@ -5,8 +5,7 @@
 
 # Extra skill mappings per agent (beyond prefix matching)
 [agent-skills]
-iced = ["iced-rs", "trading-design", "visual-qa-desktop", "price-handling"]
-generalist = ["visual-qa-desktop"]
+iced = ["iced-rs", "trading-design", "price-handling"]
 
 # Skills given to all agents of a role
 [role-skills]

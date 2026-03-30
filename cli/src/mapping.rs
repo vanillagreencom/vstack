@@ -136,11 +136,11 @@ mod tests {
         let mut config = MappingConfig::default();
         config
             .agent_skills
-            .insert("iced".into(), vec!["iced-rs".into(), "visual-qa-desktop".into()]);
-        let available = vec!["iced-rs".into(), "visual-qa-desktop".into(), "other".into()];
+            .insert("iced".into(), vec!["iced-rs".into(), "trading-design".into()]);
+        let available = vec!["iced-rs".into(), "trading-design".into(), "other".into()];
         let matched = config.skills_for_agent("iced", &AgentRole::Engineer, &available);
         assert!(matched.contains(&"iced-rs".to_string()));
-        assert!(matched.contains(&"visual-qa-desktop".to_string()));
+        assert!(matched.contains(&"trading-design".to_string()));
         assert!(!matched.contains(&"other".to_string()));
     }
 
@@ -260,10 +260,10 @@ mod tests {
         let mut config = MappingConfig::default();
         config
             .agent_skills
-            .insert("iced".into(), vec!["visual-qa-desktop".into()]);
-        let available = vec!["iced-rs".into(), "visual-qa-desktop".into()];
+            .insert("iced".into(), vec!["trading-design".into()]);
+        let available = vec!["iced-rs".into(), "trading-design".into()];
         let matched = config.skills_for_agent("reviewer-iced", &AgentRole::Reviewer, &available);
         assert!(matched.contains(&"iced-rs".to_string()));
-        assert!(matched.contains(&"visual-qa-desktop".to_string()));
+        assert!(matched.contains(&"trading-design".to_string()));
     }
 }

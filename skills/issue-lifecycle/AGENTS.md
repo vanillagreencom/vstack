@@ -283,30 +283,7 @@ Always report unresolved validation failures to orchestrator.
 
 **Skip if** the issue does not have the `design` label.
 
-Before running commands:
-- If the project defines `$VISUAL_QA_TARGET_CMD`, run it first to select the correct target and any companion validation commands.
-- Otherwise, use the current/default target from `visual-qa.conf`.
-
-Run a targeted visual check using the visual QA skill:
-- **Rendering change**: `$SCREENSHOT_CLI --no-build` → Read the PNG to verify
-- **Map-capable interaction / layout target**:
-  1. `$VISUAL_QA_CLI doctor`
-  2. Start a visual QA session. If the project exposes a representative fixture path, prefer it:
-     - `$VISUAL_QA_CLI start --build --layout "$VISUAL_QA_FIXTURE"`
-     - Otherwise: `$VISUAL_QA_CLI start --build`
-  3. `$VISUAL_QA_CLI map`
-  4. Use map-first high-level commands to test the affected behavior
-  5. Use `locate` only for literal text targets or OCR sanity checks
-  6. Capture a screenshot or short recording if it adds evidence
-- **Screenshot/OCR-only target**:
-  1. `$VISUAL_QA_CLI doctor`
-  2. `$VISUAL_QA_CLI start --build`
-  3. Use `locate`, `click`, `status`, and `screenshot` to test the affected behavior
-  4. Pair this with any project-specific runtime validation command (for example `$VISUAL_QA_SMOKE_CMD`) when available
-  5. If the target is a component viewer, showcase, or other multi-state surface, run `$VISUAL_QA_SWEEP_CMD` when the project defines it; otherwise perform a representative sweep per `visual-qa-desktop/references/screenshot-target-sweep.md`
-- **Broad interaction change**: Run `$VISUAL_QA_BATTERY_CMD` when the project defines one; otherwise note that no dedicated visual battery exists
-
-Focus on what your changes affect — not the full checklist. Do NOT capture golden baselines — that happens at submit-pr time.
+Use visual QA skills as necessary to validate that UI changes render correctly. Focus on what your changes affect — not the full checklist. Do NOT capture golden baselines — that happens at submit-pr time.
 
 ### § 6. Reflect & Update Skills/Rules
 
@@ -525,30 +502,7 @@ $VALIDATE_CMD --recheck            # Only re-runs previously failed checks (skip
 
 **Skip if** the issue does not have the `design` label, or the fix does not touch UI code.
 
-Before running commands:
-- If the project defines `$VISUAL_QA_TARGET_CMD`, run it first to select the correct target and any companion validation commands.
-- Otherwise, use the current/default target from `visual-qa.conf`.
-
-Run a targeted visual check using the visual QA skill:
-- **Rendering fix**: `$SCREENSHOT_CLI --no-build` → Read the PNG to verify
-- **Map-capable interaction / layout target**:
-  1. `$VISUAL_QA_CLI doctor`
-  2. Start a visual QA session. If the project exposes a representative fixture path, prefer it:
-     - `$VISUAL_QA_CLI start --layout "$VISUAL_QA_FIXTURE"`
-     - Otherwise: `$VISUAL_QA_CLI start`
-  3. `$VISUAL_QA_CLI map`
-  4. Use map-first high-level commands to test the affected behavior
-  5. Use `locate` only for literal text targets or OCR sanity checks
-  6. Capture a screenshot or short recording if it adds evidence
-- **Screenshot/OCR-only target**:
-  1. `$VISUAL_QA_CLI doctor`
-  2. `$VISUAL_QA_CLI start --build`
-  3. Use `locate`, `click`, `status`, and `screenshot` to test the affected behavior
-  4. Pair this with any project-specific runtime validation command (for example `$VISUAL_QA_SMOKE_CMD`) when available
-  5. If the target is a component viewer, showcase, or other multi-state surface, run `$VISUAL_QA_SWEEP_CMD` when the project defines it; otherwise perform a representative sweep per `visual-qa-desktop/references/screenshot-target-sweep.md`
-- **Broader regression risk**: Run `$VISUAL_QA_BATTERY_CMD` when the project defines one; otherwise note that no dedicated visual battery exists
-
-Focus on what the fix changes — not the full checklist.
+Use visual QA skills as necessary to validate that the fix renders correctly. Focus on what the fix changes — not the full checklist.
 
 #### 4.2 Commit
 

@@ -5,7 +5,6 @@ license: MIT
 user-invocable: true
 dependencies:
   required: [linear, github, worktree, issue-lifecycle, project-management, decider]
-  optional: [visual-qa-desktop]
 metadata:
   author: vanillagreen
   version: "1.1.0"

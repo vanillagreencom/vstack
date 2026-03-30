@@ -297,18 +297,12 @@ LABELS=$($ISSUE_CLI cache issues get "$ISSUE_ID" --format=compact 2>/dev/null | 
 
 If `design` label present:
 
-1. **Capture baselines in worktree**:
-   - If the project defines `$VISUAL_QA_BASELINE_CMD`, use it. This command may set a target, run extra preparation, or skip capture for projects whose current visual-QA target does not support baselines.
-   - Otherwise, run the visual-qa-desktop skill's baseline capture on the default baseline-capable target.
-   ```bash
-   (cd [WT_PATH] && visual-qa-desktop skill baseline capture)
-   ```
-   The visual-qa-desktop skill builds the binary and writes baseline artifacts to the worktree's test data directory. If the project has no baseline-capable target, skip this step and report why.
+1. **Capture baselines in worktree**: Use visual QA skills as necessary to capture golden baselines in the worktree. If the project has no baseline-capable target, skip this step and report why.
 
 2. **Commit and push** (without retriggering CI). Baselines are platform-specific:
    ```bash
    git -C [WT_PATH] add [BASELINE_PATH]/
-   git -C [WT_PATH] commit -m "chore(visual-qa-desktop): update golden baselines [skip ci]"
+   git -C [WT_PATH] commit -m "chore(visual-qa): update golden baselines [skip ci]"
    $WORKTREE_CLI push [WT_PATH] --no-rebase
    ```
 

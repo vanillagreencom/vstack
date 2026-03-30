@@ -271,7 +271,7 @@ name: test-skill
 description: Test
 dependencies:
   required: [linear, decider]
-  optional: [visual-qa-desktop]
+  optional: [benchmarking]
 ---
 
 # Test
@@ -302,7 +302,7 @@ dependencies:
             skill
                 .resolved_deps
                 .iter()
-                .any(|d| d.name == "visual-qa-desktop" && d.optional)
+                .any(|d| d.name == "benchmarking" && d.optional)
         );
     }
 
