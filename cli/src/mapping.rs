@@ -169,12 +169,9 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push_str("# after the agent's built-in description. Tells the\n");
     out.push_str("# AI when to pick this agent for your project.\n");
     out.push_str("#\n");
-    out.push_str("# [agent-guidance]\n");
+    out.push_str("[agent-guidance]\n");
     for name in agents {
-        out.push_str(&format!("# {} = \"\"\n", name));
-    }
-    if agents.is_empty() {
-        out.push_str("# my-agent = \"\"\n");
+        out.push_str(&format!("{} = \"\"\n", name));
     }
 
     // ── agent-instructions ──
@@ -183,12 +180,9 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push_str("# bottom of each agent file. Project-specific rules,\n");
     out.push_str("# conventions, or reminders for this agent.\n");
     out.push_str("#\n");
-    out.push_str("# [agent-instructions]\n");
+    out.push_str("[agent-instructions]\n");
     for name in agents {
-        out.push_str(&format!("# {} = \"\"\n", name));
-    }
-    if agents.is_empty() {
-        out.push_str("# my-agent = \"\"\n");
+        out.push_str(&format!("{} = \"\"\n", name));
     }
 
     // ── custom-skills ──
@@ -228,18 +222,7 @@ fn update_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push('\n');
 
     if !new_agents.is_empty() {
-        out.push_str("\n\n# ── New agents ───────────────────────────────────────\n");
-        out.push_str("# Uncomment and move into the sections above.\n");
-        out.push_str("#\n");
-        out.push_str("# [agent-guidance]\n");
-        for name in &new_agents {
-            out.push_str(&format!("# {} = \"\"\n", name));
-        }
-        out.push_str("#\n");
-        out.push_str("# [agent-instructions]\n");
-        for name in &new_agents {
-            out.push_str(&format!("# {} = \"\"\n", name));
-        }
+        out = insert_keys_into_sections(&out, &new_agents);
     }
 
     append_skills_reference(&mut out, skills);
@@ -264,6 +247,63 @@ fn append_skills_reference(out: &mut String, skills: &[String]) {
             out.push_str(&format!("#   {}\n", name));
         }
     }
+}
+
+/// Insert new agent keys into existing [agent-guidance] and [agent-instructions]
+/// sections, preserving all other content including comments.
+fn insert_keys_into_sections(content: &str, new_agents: &[&String]) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result: Vec<String> = Vec::new();
+
+    let target_sections = ["[agent-guidance]", "[agent-instructions]"];
+    let mut i = 0;
+
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        result.push(lines[i].to_string());
+
+        // Check if this line is a target section header
+        if target_sections.contains(&trimmed) {
+            // Scan forward to find the last key = value line in this section
+            i += 1;
+            while i < lines.len() {
+                let next = lines[i].trim();
+                // Stop at next section header, a comment-only divider line, or blank line
+                // that's followed by a section header or divider
+                let is_key_line = next.contains(" = ") || next.contains("= ");
+                let is_comment = next.starts_with('#');
+                let is_blank = next.is_empty();
+
+                if next.starts_with('[') && !next.starts_with("# [") {
+                    // Hit next section — insert before it
+                    break;
+                }
+
+                if is_blank || (is_comment && next.starts_with("# ──")) {
+                    // Blank line or section divider — insert before it
+                    break;
+                }
+
+                result.push(lines[i].to_string());
+
+                if !is_key_line && !is_comment {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+
+            // Insert new agent keys here
+            for name in new_agents {
+                result.push(format!("{} = \"\"", name));
+            }
+            continue;
+        }
+
+        i += 1;
+    }
+
+    result.join("\n")
 }
 
 fn strip_skills_reference(content: &str) -> String {
@@ -635,8 +675,8 @@ rust = "Use for Rust work."
 
         // Original rust placeholders preserved
         assert!(updated.contains("# rust ="));
-        // New iced agent added
-        assert!(updated.contains("# iced ="));
+        // New iced agent added (uncommented, empty value)
+        assert!(updated.contains("iced = \"\""));
         // Skills reference updated
         assert!(updated.contains("#   trading-design"));
         // Old skills still listed
@@ -674,10 +714,10 @@ rust = "Always use thiserror for errors."
         // User content preserved
         assert!(updated.contains("rust = \"Use for my backend services.\""));
         assert!(updated.contains("rust = \"Always use thiserror for errors.\""));
-        // New agent added as comment
-        assert!(updated.contains("# iced ="));
+        // New agent added (uncommented, empty value)
+        assert!(updated.contains("iced = \"\""));
         // Rust not duplicated
-        let iced_section = updated.find("# iced =").unwrap();
+        let iced_section = updated.find("iced = \"\"").unwrap();
         assert!(
             !updated[iced_section..].contains("# rust ="),
             "rust should not appear in new agents section"
