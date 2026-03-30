@@ -1225,6 +1225,26 @@ fn run_tabbed_select(
                         }
                     }
                     MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                        // Repo dialog clicks
+                        if let Some(dialog) = select.repo_dialog.as_mut() {
+                            let inner = select.repo_dialog_inner;
+                            if !dialog.input_mode && inner.contains(pos) {
+                                let row = (pos.y - inner.y) as usize;
+                                let total_options = dialog.options.len();
+                                if row < total_options {
+                                    let source =
+                                        dialog.options[row].source.clone();
+                                    select.repo_dialog = None;
+                                    break SelectResult::SwitchSource(source);
+                                } else if row == total_options {
+                                    // "+ Add repo by link"
+                                    dialog.input_mode = true;
+                                    dialog.input.clear();
+                                }
+                            }
+                            continue;
+                        }
+
                         if select.source_chip_area.contains(pos)
                             && !select.source_options.is_empty()
                         {

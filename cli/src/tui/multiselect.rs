@@ -92,6 +92,8 @@ pub struct TabbedSelect {
     pub step_hit_areas: Vec<ratatui::layout::Rect>,
     /// Exact clickable tab areas from the last render.
     pub tab_hit_areas: Vec<ratatui::layout::Rect>,
+    /// Inner content area of the repo dialog from the last render.
+    pub repo_dialog_inner: ratatui::layout::Rect,
     /// Visible list rows from the last render, mapped to item indices.
     pub rendered_list_rows: Vec<Option<usize>>,
     /// Total rendered row count from the last draw.
@@ -126,6 +128,7 @@ impl TabbedSelect {
             source_chip_area: ratatui::layout::Rect::default(),
             step_hit_areas: Vec::new(),
             tab_hit_areas: Vec::new(),
+            repo_dialog_inner: ratatui::layout::Rect::default(),
             rendered_list_rows: Vec::new(),
             rendered_total_rows: 0,
             list_visible_rows: 0,

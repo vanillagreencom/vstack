@@ -1008,6 +1008,7 @@ fn draw_repo_dialog(frame: &mut Frame, select: &mut TabbedSelect) {
         ))
         .padding(Padding::new(1, 1, 1, 1));
     let inner = block.inner(dialog_area);
+    select.repo_dialog_inner = inner;
     frame.render_widget(block, dialog_area);
 
     if dialog.input_mode {
