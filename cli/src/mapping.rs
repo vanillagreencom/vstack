@@ -133,36 +133,69 @@ impl ProjectConfig {
     }
 }
 
-const PROJECT_CONFIG_TEMPLATE: &str = r#"# vstack.toml — project-level agent customization
-#
-# Customize agent behavior for this project. These settings are merged
-# into generated agent files each time agents are installed or refreshed.
-#
-# After editing this file, run `vstack refresh` (or press 'f' in the
-# vstack TUI Installed tab) to regenerate agent files with your changes.
-
-# When to use each agent — appears near the top of the generated agent file.
-# [agent-guidance]
-# rust = "Use for backend API services and CLI tools in this project."
-
-# Additional instructions appended to the bottom of each agent file.
-# [agent-instructions]
-# rust = "Always run `cargo clippy` before committing. Use the project's custom error type."
-
-# Extra skills to attach to specific agents (beyond automatic prefix matching).
-# [custom-skills]
-# rust = [
-#   { name = "my-skill", description = "Project-specific testing skill" },
-# ]
-"#;
-
 /// Create vstack.toml at the project root if it doesn't exist.
-pub fn ensure_project_config(project_root: &Path) {
+/// Generates commented-out placeholders for each installed agent and skill.
+pub fn ensure_project_config(project_root: &Path, agents: &[String], skills: &[String]) {
     let path = project_root.join("vstack.toml");
     if path.exists() {
         return;
     }
-    let _ = std::fs::write(&path, PROJECT_CONFIG_TEMPLATE);
+
+    let mut out = String::from(
+        "# vstack.toml — project-level agent customization\n\
+         #\n\
+         # Customize agent behavior for this project. These settings are merged\n\
+         # into generated agent files each time agents are installed or refreshed.\n\
+         #\n\
+         # After editing this file, run `vstack refresh` to regenerate agent files.\n\
+         # Uncomment and edit the sections below as needed.\n\n",
+    );
+
+    // [agent-guidance]
+    out.push_str("# When to use each agent — appears near the top of the generated agent file.\n");
+    out.push_str("# [agent-guidance]\n");
+    for name in agents {
+        out.push_str(&format!("# {} = \"When to use this agent in your project.\"\n", name));
+    }
+    if agents.is_empty() {
+        out.push_str("# my-agent = \"When to use this agent in your project.\"\n");
+    }
+    out.push('\n');
+
+    // [agent-instructions]
+    out.push_str("# Additional instructions appended to the bottom of each agent file.\n");
+    out.push_str("# [agent-instructions]\n");
+    for name in agents {
+        out.push_str(&format!("# {} = \"Project-specific rules for this agent.\"\n", name));
+    }
+    if agents.is_empty() {
+        out.push_str("# my-agent = \"Project-specific rules for this agent.\"\n");
+    }
+    out.push('\n');
+
+    // [custom-skills]
+    out.push_str("# Extra skills to attach to specific agents (beyond automatic matching).\n");
+    out.push_str("# [custom-skills]\n");
+    for name in agents {
+        out.push_str(&format!(
+            "# {} = [\n#   {{ name = \"my-skill\", description = \"What this skill does\" }},\n# ]\n",
+            name
+        ));
+    }
+    if agents.is_empty() {
+        out.push_str("# my-agent = [\n#   { name = \"my-skill\", description = \"What this skill does\" },\n# ]\n");
+    }
+
+    // Reference: installed skills
+    if !skills.is_empty() {
+        out.push('\n');
+        out.push_str("# Installed skills (for reference when adding custom-skills above):\n");
+        for name in skills {
+            out.push_str(&format!("#   - {}\n", name));
+        }
+    }
+
+    let _ = std::fs::write(&path, out);
 }
 
 #[derive(Debug, Default, Deserialize)]

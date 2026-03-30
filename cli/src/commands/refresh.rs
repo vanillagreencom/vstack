@@ -16,7 +16,19 @@ pub fn run(global: bool) -> Result<()> {
     }
 
     if !global {
-        crate::mapping::ensure_project_config(&project_root);
+        let agent_names: Vec<String> = lock
+            .entries
+            .iter()
+            .filter(|(_, e)| e.kind == ItemKind::Agent)
+            .map(|(n, _)| n.clone())
+            .collect();
+        let skill_names: Vec<String> = lock
+            .entries
+            .iter()
+            .filter(|(_, e)| e.kind == ItemKind::Skill)
+            .map(|(n, _)| n.clone())
+            .collect();
+        crate::mapping::ensure_project_config(&project_root, &agent_names, &skill_names);
     }
     let mut project_config = crate::mapping::ProjectConfig::load(&project_root);
 

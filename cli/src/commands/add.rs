@@ -269,7 +269,9 @@ pub fn run(
 
     // Ensure project-level vstack.toml exists for customization
     if !global {
-        crate::mapping::ensure_project_config(&config::project_root());
+        let agent_names: Vec<String> = selected_agents.iter().map(|a| a.name.clone()).collect();
+        let skill_names: Vec<String> = selected_skills.iter().map(|s| s.name.clone()).collect();
+        crate::mapping::ensure_project_config(&config::project_root(), &agent_names, &skill_names);
     }
 
     let mut project_config = crate::mapping::ProjectConfig::load(&config::project_root());
