@@ -65,6 +65,19 @@ pub fn run(global: bool) -> Result<()> {
         .map(|(name, _)| name.clone())
         .collect();
 
+    let installed_hook_names: std::collections::HashSet<String> = lock
+        .entries
+        .iter()
+        .filter(|(_, e)| e.kind == ItemKind::Hook)
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    // Filter source hooks to only those actually installed
+    let installed_hooks: Vec<crate::hook::Hook> = all_source_hooks
+        .into_iter()
+        .filter(|h| installed_hook_names.contains(&h.name))
+        .collect();
+
     // Refresh agents
     let mut agents_refreshed = 0usize;
     let mut skills_refreshed = 0usize;
@@ -99,7 +112,7 @@ pub fn run(global: bool) -> Result<()> {
         }
 
         let matched_hooks: Vec<crate::hook::Hook> = mapping
-            .hooks_for_agent(&agent.role, &all_source_hooks)
+            .hooks_for_agent(&agent.role, &installed_hooks)
             .into_iter()
             .cloned()
             .collect();
