@@ -39,8 +39,8 @@ pub fn generate_agent(
     }
 
     // Hooks frontmatter (Claude Code native format)
-    if !hooks.is_empty() {
-        output.push_str(&format_hooks_yaml(hooks));
+    if !hooks.is_empty() || !extras.custom_hooks.is_empty() {
+        output.push_str(&format_hooks_yaml_with_custom(hooks, &extras.custom_hooks));
     }
 
     output.push_str("---\n\n");
@@ -105,6 +105,51 @@ fn format_hooks_yaml(hooks: &[Hook]) -> String {
                     "          command: \".claude/hooks/{}.sh\"\n",
                     h.name
                 ));
+            }
+        }
+    }
+
+    yaml
+}
+
+/// Format both installed hooks and custom hooks into Claude Code YAML frontmatter.
+fn format_hooks_yaml_with_custom(
+    hooks: &[Hook],
+    custom: &[agent::CustomHookEntry],
+) -> String {
+    // Group by event → matcher → list of commands
+    let mut by_event: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
+
+    for hook in hooks {
+        let matcher = hook.matcher.clone().unwrap_or_else(|| "*".to_string());
+        by_event
+            .entry(hook.event.clone())
+            .or_default()
+            .entry(matcher)
+            .or_default()
+            .push(format!(".claude/hooks/{}.sh", hook.name));
+    }
+
+    for hook in custom {
+        let matcher = hook.matcher.clone().unwrap_or_else(|| "*".to_string());
+        by_event
+            .entry(hook.event.clone())
+            .or_default()
+            .entry(matcher)
+            .or_default()
+            .push(hook.command.clone());
+    }
+
+    let mut yaml = String::from("hooks:\n");
+
+    for (event, matchers) in &by_event {
+        yaml.push_str(&format!("  {}:\n", event));
+        for (matcher, commands) in matchers {
+            yaml.push_str(&format!("    - matcher: {}\n", matcher));
+            yaml.push_str("      hooks:\n");
+            for cmd in commands {
+                yaml.push_str("        - type: command\n");
+                yaml.push_str(&format!("          command: \"{}\"\n", cmd));
             }
         }
     }

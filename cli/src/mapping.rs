@@ -23,6 +23,32 @@ pub struct ProjectConfig {
     pub agent_guidance: HashMap<String, String>,
     #[serde(rename = "agent-instructions")]
     pub agent_instructions: HashMap<String, String>,
+    #[serde(rename = "custom-hooks", default)]
+    pub custom_hooks: Vec<CustomHook>,
+}
+
+/// A user-defined hook from project config
+#[derive(Debug, Clone, Deserialize)]
+pub struct CustomHook {
+    pub event: String,
+    #[serde(default)]
+    pub matcher: Option<String>,
+    pub command: String,
+    /// Which agents to apply to: "all", a role name ("engineer"),
+    /// or a list of agent names (["rust", "iced"])
+    #[serde(default = "default_hook_agents")]
+    pub agents: CustomHookTarget,
+}
+
+fn default_hook_agents() -> CustomHookTarget {
+    CustomHookTarget::All("all".into())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum CustomHookTarget {
+    All(String),
+    List(Vec<String>),
 }
 
 impl ProjectConfig {
@@ -60,6 +86,29 @@ impl ProjectConfig {
     /// Get additional instructions for an agent
     pub fn instructions_for(&self, agent_name: &str) -> Option<&str> {
         self.agent_instructions.get(agent_name).map(|s| s.as_str())
+    }
+
+    /// Get custom hooks that apply to a specific agent, as CustomHookEntry for agent frontmatter
+    pub fn custom_hooks_for(
+        &self,
+        agent_name: &str,
+        agent_role: &crate::agent::AgentRole,
+    ) -> Vec<crate::agent::CustomHookEntry> {
+        let role_str = agent_role.as_str();
+        self.custom_hooks
+            .iter()
+            .filter(|h| match &h.agents {
+                CustomHookTarget::All(s) => s == "all",
+                CustomHookTarget::List(names) => {
+                    names.iter().any(|n| n == agent_name || n == role_str)
+                }
+            })
+            .map(|h| crate::agent::CustomHookEntry {
+                event: h.event.clone(),
+                matcher: h.matcher.clone(),
+                command: h.command.clone(),
+            })
+            .collect()
     }
 
     /// Merge extracted agent sections into vstack.toml, preserving existing entries.
@@ -206,6 +255,7 @@ fn create_project_config(path: &Path, agents: &[String], skills: &[String]) {
     out.push_str("# event = \"PreToolUse\"      # PreToolUse | PostToolUse | PostCompact | TaskCompleted\n");
     out.push_str("# matcher = \"Bash\"           # optional: Bash | Edit|Write | (omit for all)\n");
     out.push_str("# command = \"./scripts/my-hook.sh\"\n");
+    out.push_str("# agents = \"all\"             # \"all\", a role (\"engineer\"), or a list [\"rust\", \"iced\"]\n");
 
     append_skills_reference(&mut out, skills);
     let _ = std::fs::write(path, out);

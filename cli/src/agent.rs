@@ -194,6 +194,16 @@ pub fn match_hooks<'a>(
 pub struct AgentExtras {
     pub guidance: Option<String>,
     pub instructions: Option<String>,
+    /// Custom hooks from vstack.toml (Claude Code only — command paths)
+    pub custom_hooks: Vec<CustomHookEntry>,
+}
+
+/// A custom hook entry for agent frontmatter
+#[derive(Debug, Clone)]
+pub struct CustomHookEntry {
+    pub event: String,
+    pub matcher: Option<String>,
+    pub command: String,
 }
 
 /// Generate an "Execute on Launch" markdown section
@@ -228,6 +238,7 @@ pub fn extract_user_sections(content: &str) -> AgentExtras {
         guidance: extract_section(content, "## Execute on Launch")
             .or_else(|| extract_section(content, "## When to Use")),
         instructions: extract_section(content, "## Additional Instructions"),
+        ..Default::default()
     }
 }
 

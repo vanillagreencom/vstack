@@ -133,6 +133,7 @@ pub fn run(global: bool) -> Result<()> {
             instructions: project_config
                 .instructions_for(&agent.name)
                 .map(String::from),
+            custom_hooks: project_config.custom_hooks_for(&agent.name, &agent.role),
         };
 
         for harness_id in &entry.harnesses {

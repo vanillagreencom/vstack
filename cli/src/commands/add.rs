@@ -372,6 +372,7 @@ pub fn run(
                     .instructions_for(&a.name)
                     .or(file_extras.instructions.as_deref())
                     .map(String::from),
+                custom_hooks: project_config.custom_hooks_for(&a.name, &a.role),
             };
 
             let result = installer::install_agent(
@@ -761,6 +762,7 @@ fn reconcile_agents(
             instructions: project_config
                 .instructions_for(&agent.name)
                 .map(String::from),
+            custom_hooks: project_config.custom_hooks_for(&agent.name, &agent.role),
         };
 
         // Regenerate for each harness this agent is installed to
