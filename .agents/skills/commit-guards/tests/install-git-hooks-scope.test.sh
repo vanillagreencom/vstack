@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Which repository an install belongs to, and what the chain composes with:
-# shared hooks directories and linked work trees, a copy-method install
-# rediscovered, hooks written back byte-for-byte, and the doc-limits and
-# preflight lanes the shim runs beside its own checks — including every way
-# one of them can be broken, which blocks rather than skips.
+# Which scripts the shim reaches and which lanes run beside them: a helper
+# whose baked scripts directory is gone rediscovering the package under a
+# skill root, in the main checkout of a linked worktree, and never in a
+# directory that only looks like the main checkout; a consumer's hook given
+# back byte for byte; the doc-limits and preflight lanes the chain runs
+# beside its own checks, and every way one of them is broken or replaced,
+# which blocks or is a stated skip and never a silent one. One table: a row
+# builds its own repository, runs one action and reads back the exit status
+# with every line this package prints, the chain's own step lines included,
+# so a row shows which lanes ran and from which scripts directory. Arming
+# and the gate itself are install-git-hooks.test.sh, --check
+# install-git-hooks-check.test.sh, core.hooksPath the hookspath suite.
 set -euo pipefail
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/harness.bash
@@ -11,391 +18,267 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/install-hooks.bash
 . "$TEST_DIR/lib/install-hooks.bash"
 
-# The subject is which scripts the shim reaches and which lanes run beside
-# them, never the composition of the batch itself — doc-limits and preflight
-# are chain lanes, not members of it. So the batch runs one check, and each
-# check keeps its own suite.
-export COMMIT_GUARDS_CHECKS=todo-ban
+# The lanes are the subject here, so the chain's step lines are kept beside
+# the package's verdict lines; each lane's own report is still its suite's.
+KEEP="${KEEP%)}|=== pre-commit: )"
+ROOTS=".agents/skills .claude/skills .cursor/skills .gemini/skills .github/skills .opencode/skills skills"
+DL="=== pre-commit: doc-limits (document byte ceilings)"
+BATCH="=== pre-commit: commit-guards all --staged"
+LOCAL_NONE="=== pre-commit: repo-local entry: none configured"
+PF_FIRST="=== pre-commit: first commit — preflight --staged has no base; skipped"
+PF_RAN="=== pre-commit: preflight"
+# The verdict names git's bypass flag; assembled from split tokens so this
+# file never carries the flag itself (the quality corpus reads it as code).
+ERRORS="pre-commit: a guard could not complete — commit blocked; fix the errors above (bypass only with git commit --no-""verify)"
+SCRIPTS="<repo>/.agents/skills/commit-guards/scripts"
+skip() { printf '=== pre-commit: %s not installed — skipped (no %s skill under %s (%s), nor at %s/../../%s)' "$1" "$1" "$2" "$ROOTS" "$3" "$1"; } # LANE SEARCHED SCRIPTS-DIR
+# The lane lines of a commit whose chain runs from SCRIPTS-DIR with the
+# committing tree at SEARCHED and no preflight installed.
+lanes() { printf '%s;%s;%s;%s;%s' "$DL" "$(skip preflight "$1" "$2")" "$(skip bot-instructions "$1" "$2")" "$BATCH" "$LOCAL_NONE"; } # SEARCHED SCRIPTS-DIR
+CLEAN="$(lanes '<repo>' "$SCRIPTS");$CHAIN_OK"
+BLOCKS="$(lanes '<repo>' "$SCRIPTS");$BLOCKED"
+# The baked value spans lines when the project name holds a newline, so the
+# blanking runs from the assignment to the comment that follows it.
+blank_baked() {
+  local h="${HOOKS_OVERRIDE:-$R/.git/hooks}/kendex-guards" before=""
+  before="$(cat -- "$h")"
+  awk 'BEGIN { skip = 0 } /^installed_scripts=/ { print "installed_scripts=\047\047"; skip = 1; next } skip && /^# Baked:/ { skip = 0 } !skip { print }' "$h" >"$h.new"
+  cat "$h.new" >"$h"
+  rm -f "$h.new"
+  [ "$before" != "$(cat -- "$h")" ] || bad "fixture: ${R##*/}: the baked path was blanked" "the helper did not change"
+}
+decoy() { # DIR — a commit-guards scripts directory whose lanes announce themselves and pass
+  local lane
+  mkdir -p "$1"
+  for lane in pre-commit commit-msg; do
+    printf '#!/bin/sh\necho "foreign: decoy ran"\nexit 0\n' >"$1/$lane"
+    chmod +x "$1/$lane"
+  done
+}
+render_into() { mkdir -p "$1/.agents/skills"; cp -R "$GG_SKILL_TEMPLATE" "$1/.agents/skills/commit-guards"; ln -s "$SKILL_DIR/../doc-limits" "$1/.agents/skills/doc-limits"; } # DIR
+identity() { git -C "$1" config user.email test@example.com; git -C "$1" config user.name test; }
 
-echo "=== a copy-method install is rediscovered ==="
-R19="$(new_repo copymethod)"
-install_in "$R19"
-mkdir -p "$R19/.claude/skills"
-mv "$R19/.agents/skills/commit-guards" "$R19/.claude/skills/commit-guards"
-sed -i.bak "s|^installed_scripts=.*|installed_scripts='$R19/gone/scripts'|" "$R19/.git/hooks/kendex-guards"
-rm -f "$R19/.git/hooks/kendex-guards.bak"
-printf 'hello\n' >"$R19/a.txt"
-git -C "$R19" add a.txt
-commit_in "$R19" "feat: add a"
-[ "$RC" -eq 0 ] && ok "a skill under .claude/skills is rediscovered" || bad ".claude/skills rediscovered" "rc=$RC out=$OUT"
-printf '# %s: nope\n' "$TD" >"$R19/b.py"
-git -C "$R19" add b.py
-commit_in "$R19" "feat: add b"
-[ "$RC" -ne 0 ] && ok "control: the rediscovered chain still blocks" || bad "copy-method chain blocks" "rc=$RC out=$OUT"
+echo "=== the helper rediscovers this repository's package, and only this repository's ==="
+copy_method() { # NAME — the package moved to .claude/skills after arming, the baked path stale
+  armed "$1"
+  mkdir -p "$R/.claude/skills"
+  mv "$R/.agents/skills/commit-guards" "$R/.claude/skills/commit-guards"
+  edit "$R/.git/hooks/kendex-guards" "s|^installed_scripts=.*|installed_scripts='$R/gone/scripts'|"
+}
+fx_copy_clean() { copy_method copy-clean; stage a.txt 'hello\n'; }
+fx_copy_marker() { copy_method copy-marker; stage_marker; }
+# Under --separate-git-dir the directory holding the git directory is not
+# the checkout; a package beside it must not run as this repository's gate.
+# That directory is a checkout root of another repository, so being a root
+# does not save it: only owning the git directory does.
+fx_separate() {
+  local out="$TMP/separate"
+  mkdir -p "$out"
+  git -C "$out" init -q
+  git init -q --separate-git-dir "$out/elsewhere.git" "$out/checkout"
+  R="$out/checkout"
+  identity "$R"
+  decoy "$out/.agents/skills/commit-guards/scripts"
+  render_into "$R"
+  "$R/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true
+  HOOKS_OVERRIDE="$out/elsewhere.git/hooks" blank_baked
+  printf '.agents/\n' >"$R/.gitignore"
+  stage_marker
+}
+# A git directory inside its own work tree makes the directory above it pass
+# the ownership test; being a checkout root is the second test.
+fx_inside() {
+  R="$TMP/inside"
+  mkdir -p "$R/meta"
+  git init -q --separate-git-dir "$R/meta/repo.git" "$R"
+  identity "$R"
+  printf 'meta/\n.agents/\n' >"$R/.gitignore"
+  decoy "$R/meta/.agents/skills/commit-guards/scripts"
+  render_into "$R"
+  "$R/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true
+  HOOKS_OVERRIDE="$R/meta/repo.git/hooks" blank_baked
+  stage_marker
+}
+fx_linked() { # a linked worktree with no render of its own, the main checkout's baked path blanked
+  armed linked
+  stage a.txt 'hello\n'
+  seed
+  git -C "$R" worktree add -q "$TMP/wt-linked" -b wt-linked
+  W="$TMP/wt-linked"
+  blank_baked
+  printf '# %s: nope\n' "$TD" >"$W/c.py"
+  git -C "$W" add c.py
+}
+fx_symlinked() { # the checkout reached through a symlink, the baked path blanked
+  armed symlinked
+  stage_marker
+  blank_baked
+  ln -s "$R" "$TMP/via-link"
+  W="$TMP/via-link"
+}
+fx_no_package() { armed no-package; stage a.txt 'hello\n'; blank_baked; rm -rf -- "${R:?}/.agents/skills/commit-guards"; }
+# A project below the work-tree root whose sibling sits under another skill
+# root than the copy: only the project root reaches it.
+fx_project_root() {
+  R="$TMP/project-root"
+  mkdir -p "$R/sub/.agents/skills" "$R/sub/.claude/skills"
+  git -C "$R" init -q
+  identity "$R"
+  cp -R "$GG_SKILL_TEMPLATE" "$R/sub/.agents/skills/commit-guards"
+  ln -s "$SKILL_DIR/../doc-limits" "$R/sub/.claude/skills/doc-limits"
+  "$R/sub/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true
+  printf 'sub/\n' >"$R/.gitignore"
+  settings 'DOC_LIMITS_CLASSES = "*.md=1k"'
+  stage big.md "$(head -c 1025 /dev/zero | tr '\0' x)"
+}
+SUB_SCRIPTS="<repo>/sub/.agents/skills/commit-guards/scripts"
+# A copy installed outside every skill root finds its siblings beside
+# itself: neither the committing tree nor a project root carries them.
+fx_vendored() {
+  R="$TMP/vendored"
+  mkdir -p "$R/vendor"
+  git -C "$R" init -q
+  identity "$R"
+  cp -R "$GG_SKILL_TEMPLATE" "$R/vendor/commit-guards"
+  ln -s "$SKILL_DIR/../doc-limits" "$R/vendor/doc-limits"
+  "$R/vendor/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true
+  printf 'vendor/\n' >"$R/.gitignore"
+  settings 'DOC_LIMITS_CLASSES = "*.md=1k"'
+  stage big.md "$(head -c 1025 /dev/zero | tr '\0' x)"
+}
+VENDOR_SCRIPTS="<repo>/vendor/commit-guards/scripts"
+CLAUDE_SCRIPTS="<repo>/.claude/skills/commit-guards/scripts"
+run_rows \
+  "a package moved under .claude/skills is rediscovered and its chain runs the commit|fx_copy_clean|$ONE|commit|feat: add a|rc=0 $(lanes '<repo>' "$CLAUDE_SCRIPTS");$CHAIN_OK;$MSG_OK feat: add a|" \
+  "control: the rediscovered chain still blocks|fx_copy_marker|$ONE|commit|feat: add b|rc=1 $(lanes '<repo>' "$CLAUDE_SCRIPTS");$BLOCKED|" \
+  "a package beside an external git directory is not this repository's: the checkout's own package gates|fx_separate|$ONE|commit|feat: separate|rc=1 $BLOCKS|" \
+  "a package under the git directory's parent inside the work tree is not the main checkout's|fx_inside|$ONE|commit|feat: inside|rc=1 $BLOCKS|" \
+  "a linked worktree is served by the main checkout's package|fx_linked|$ONE|commit|feat: linked|rc=1 $(lanes '<root>/wt-linked and <repo>' "$SCRIPTS");$BLOCKED|" \
+  "a checkout reached through a symlink is still gated, through its own root|fx_symlinked|$ONE|commit-here|feat: via link|rc=1 $BLOCKS|" \
+  "with the package gone the search fails closed and names every root|fx_no_package|$ONE|commit|feat: add a|rc=1 kendex-guards: no executable commit-guards pre-commit script at , nor under <repo> or <repo> (project '', roots $ROOTS)|" \
+  "a copy outside every skill root finds doc-limits beside itself, and it gates|fx_vendored|$ONE|commit|feat: add big|rc=1 $(lanes '<repo>' "$VENDOR_SCRIPTS");$BLOCKED|" \
+  "a project below the work-tree root finds a sibling under another of its skill roots, and it gates|fx_project_root|$ONE|commit|feat: add big|rc=1 $(lanes '<repo> and <repo>/sub' "$SUB_SCRIPTS");$BLOCKED|"
 
-echo "=== a hook with no final newline round-trips byte-for-byte ==="
-R26="$(new_repo nonewline)"
-printf '#!/bin/sh\necho mine' >"$TMP/foreign-no-newline"
-cp "$TMP/foreign-no-newline" "$R26/.git/hooks/pre-commit"
-chmod +x "$R26/.git/hooks/pre-commit"
-install_in "$R26"
-[ "$RC" -eq 0 ] && ok "installing into a hook with no final newline exits 0" || bad "no-newline install" "rc=$RC out=$OUT"
-OUT=""; RC=0
-OUT="$("$R26/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R26" --uninstall 2>&1)" || RC=$?
-cmp -s "$TMP/foreign-no-newline" "$R26/.git/hooks/pre-commit" \
-  && ok "and uninstall restores it byte-for-byte, missing newline included" \
-  || bad "no-newline restore" "got: $(cat -A "$R26/.git/hooks/pre-commit" 2>/dev/null)"
+echo "=== a consumer's hook is given back byte for byte ==="
+over() { R="$(new_repo "$1")"; printf '%b' "$2" >"$R/.git/hooks/pre-commit"; chmod "${3:-0755}" "$R/.git/hooks/pre-commit"; } # NAME BODY [MODE]
+installed_over() { over "$@"; "$R/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true; }
+fx_noeol_uninstall() { installed_over noeol-uninstall '#!/bin/sh\necho mine'; }
+fx_shebang_only() { over shebang-only '#!/bin/sh'; }
+fx_shebang_only_commit() { installed_over shebang-only-commit '#!/bin/sh'; stage a.txt 'hello\n'; }
+fx_shebang_nl_uninstall() { installed_over shebang-nl-uninstall '#!/bin/sh\n'; }
+fx_mode_kept() { over mode-kept '#!/bin/sh\necho mine\n' 0700; }
+run_rows \
+  "uninstall restores a hook with no final newline byte for byte|fx_noeol_uninstall||uninstall||rc=0 $REMOVED_BOTH|helper=absent pre-commit=$X:#!/bin/sh~echo mine<noeol> commit-msg=absent hooksPath=<unset>" \
+  "a hook that is only a newline-less shebang takes the delegate on its own line|fx_shebang_only||install||rc=0 $ARMED|helper=$OURS pre-commit=$X:#!/bin/sh~@PRE@ commit-msg=$SHIM_MSG hooksPath=<unset>" \
+  "control: that hook runs the chain|fx_shebang_only_commit|$ONE|commit|feat: add a|rc=0 $CLEAN;$MSG_OK feat: add a|" \
+  "a consumer's shebang-only hook is restored, not deleted, while the hook we created goes|fx_shebang_nl_uninstall||uninstall||rc=0 $REMOVED_BOTH|helper=absent pre-commit=$X:#!/bin/sh commit-msg=absent hooksPath=<unset>" \
+  "a rewritten hook keeps its own mode and content|fx_mode_kept||install||rc=0 $ARMED|helper=$OURS pre-commit=rwx------:#!/bin/sh~@PRE@~echo mine commit-msg=$SHIM_MSG hooksPath=<unset>"
 
-R26B="$(new_repo shebangonly)"
-printf '#!/bin/sh' >"$R26B/.git/hooks/pre-commit"
-chmod +x "$R26B/.git/hooks/pre-commit"
-install_in "$R26B"
-[ "$RC" -eq 0 ] && ok "a hook that is only a newline-less shebang installs" || bad "shebang-only install" "rc=$RC out=$OUT"
-head -n 1 "$R26B/.git/hooks/pre-commit" | grep -qx '#!/bin/sh' \
-  && ok "and the delegate does not run onto the interpreter line" \
-  || bad "shebang-only separator" "got: $(head -n 1 "$R26B/.git/hooks/pre-commit")"
-printf 'hello\n' >"$R26B/a.txt"
-git -C "$R26B" add a.txt
-commit_in "$R26B" "feat: add a"
-[ "$RC" -eq 0 ] && ok "control: the resulting hook actually runs" || bad "shebang-only hook runs" "rc=$RC out=$OUT"
+echo "=== usage ==="
+fx_nope() { R="$TMP/nope"; }
+fx_notgit() { R="$TMP/notgit"; mkdir "$R"; }
+fx_fresh() { R="$(new_repo fresh)"; }
+run_rows \
+  "a missing --repo path is a usage error|fx_nope||install||rc=2 ::error::install-git-hooks: no such directory: <repo>|" \
+  "a directory outside a git work tree is a usage error|fx_notgit||install||rc=2 ::error::install-git-hooks: not inside a git work tree: <repo>|" \
+  "an unknown flag is a usage error|fx_fresh||install|--bogus|rc=2 ::error::install-git-hooks: unknown argument '--bogus' (see --help)|"
+# Outside the table because the usage line carries the row separator.
+HELP_RC=0
+HELP_LINE="$("$INSTALL" --help 2>&1 | sed -n 1p)" || HELP_RC=$?
+assert_eq "--help is answered with the usage" "rc=0 usage: install-git-hooks [--repo PATH] [--uninstall | --check]" "rc=$HELP_RC $HELP_LINE"
 
-R26C="$(new_repo shebangonly-foreign)"
-printf '#!/bin/sh\n' >"$TMP/foreign-shebang-only"
-cp "$TMP/foreign-shebang-only" "$R26C/.git/hooks/pre-commit"
-chmod +x "$R26C/.git/hooks/pre-commit"
-install_in "$R26C"
-OUT=""; RC=0
-OUT="$("$R26C/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R26C" --uninstall 2>&1)" || RC=$?
-[ "$RC" -eq 0 ] && ok "uninstalling beside a shebang-only foreign hook exits 0" || bad "shebang-only foreign uninstall" "rc=$RC out=$OUT"
-cmp -s "$TMP/foreign-shebang-only" "$R26C/.git/hooks/pre-commit" \
-  && ok "a consumer's shebang-only hook is restored, not deleted" \
-  || bad "shebang-only foreign restored" "exists=$([ -e "$R26C/.git/hooks/pre-commit" ] && echo yes || echo no)"
-[ -e "$R26C/.git/hooks/commit-msg" ] && bad "the hook we created is still deleted" \
-  || ok "the hook we created is still deleted"
+echo "=== preflight is a lane of the chain, and a broken install of it blocks ==="
+with_preflight() { armed "$1"; ln -s "$SKILL_DIR/../preflight" "$R/.agents/skills/preflight"; } # NAME
+seeded_preflight() { with_preflight "$1"; stage a.txt 'hello\n'; seed; } # NAME — HEAD exists, so --staged has a base
+fx_pf_first() { with_preflight pf-first; stage ok.txt 'hello\n'; }
+fx_pf_blocks() { seeded_preflight pf-blocks; stage loose.sh '#!/usr/bin/env bash\necho hi\n'; }
+fx_pf_clean() { seeded_preflight pf-clean; stage ok.txt 'hello\n'; }
+fx_pf_dangling() { seeded_preflight pf-dangling; stage d.txt 'more\n'; rm "$R/.agents/skills/preflight"; ln -s "$TMP/no-such-skill" "$R/.agents/skills/preflight"; }
+fx_pf_dies() {
+  seeded_preflight pf-dies
+  stage d.txt 'more\n'
+  rm "$R/.agents/skills/preflight"
+  mkdir -p "$R/.agents/skills/preflight/scripts"
+  printf '#!/bin/sh\necho "preflight: cannot source lib/findings.sh" >&2\nexit 2\n' >"$R/.agents/skills/preflight/scripts/preflight"
+  chmod +x "$R/.agents/skills/preflight/scripts/preflight"
+}
+PF_LANES_TAIL="$(skip bot-instructions '<repo>' "$SCRIPTS");$BATCH;$LOCAL_NONE"
+run_rows \
+  "the first commit states the preflight skip instead of blocking|fx_pf_first|$ONE|commit|feat: add ok|rc=0 $DL;$PF_FIRST;$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a staged fail-open script blocks through preflight|fx_pf_blocks|$ONE|commit|feat: add loose|rc=1 $DL;$PF_RAN;$PF_LANES_TAIL;$BLOCKED|" \
+  "control: clean staged content commits through a run preflight|fx_pf_clean|$ONE|commit|feat: add ok|rc=0 $DL;$PF_RAN;$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a dangling preflight install blocks, never skips|fx_pf_dangling|$ONE|commit|feat: add d|rc=1 $DL;::error::pre-commit: the preflight skill is installed at <repo>/.agents/skills/preflight but <repo>/.agents/skills/preflight/scripts/preflight is missing or not executable — reinstall it|" \
+  "a preflight that dies at run time is a step that did not complete, and blocks|fx_pf_dies|$ONE|commit|feat: add d|rc=1 $DL;$PF_RAN;pre-commit: step 'preflight' did not complete (exit 2);$PF_LANES_TAIL;$ERRORS|"
 
-echo "=== a hook is never half-written ==="
-R22="$(new_repo atomic)"
-printf '#!/bin/sh\necho mine\n' >"$R22/.git/hooks/pre-commit"
-chmod 0700 "$R22/.git/hooks/pre-commit"
-install_in "$R22"
-[ "$(stat -c '%a' "$R22/.git/hooks/pre-commit" 2>/dev/null || stat -f '%Lp' "$R22/.git/hooks/pre-commit")" = "700" ] \
-  && ok "the rewritten hook keeps its own mode" || bad "rewritten hook keeps its mode"
-grep -qF 'echo mine' "$R22/.git/hooks/pre-commit" && ok "and its own content" || bad "rewritten hook keeps content"
-
-echo "=== usage lanes ==="
-OUT=""; RC=0; OUT="$("$INSTALL" --repo "$TMP/nope" 2>&1)" || RC=$?
-[ "$RC" -eq 2 ] && ok "a missing --repo path is exit 2" || bad "missing repo is exit 2" "rc=$RC out=$OUT"
-mkdir -p "$TMP/notgit"
-OUT=""; RC=0; OUT="$("$INSTALL" --repo "$TMP/notgit" 2>&1)" || RC=$?
-[ "$RC" -eq 2 ] && ok "a non-git directory is exit 2" || bad "non-git dir is exit 2" "rc=$RC out=$OUT"
-OUT=""; RC=0; OUT="$("$INSTALL" --bogus 2>&1)" || RC=$?
-[ "$RC" -eq 2 ] && ok "an unknown flag is exit 2" || bad "unknown flag is exit 2" "rc=$RC out=$OUT"
-OUT=""; RC=0; OUT="$("$INSTALL" --help 2>&1)" || RC=$?
-[ "$RC" -eq 0 ] && ok "--help is exit 0" || bad "--help is exit 0" "rc=$RC out=$OUT"
-
-echo "=== preflight is in the chain ==="
-R30="$(new_repo preflightchain)"
-ln -s "$SKILL_DIR/../preflight" "$R30/.agents/skills/preflight"
-install_in "$R30"
-printf 'hello\n' >"$R30/ok.txt"
-git -C "$R30" add ok.txt
-commit_in "$R30" "feat: add ok"
-[ "$RC" -eq 0 ] && ok "control: clean staged content commits with preflight installed" || bad "control: preflight clean commit" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"first commit — preflight --staged has no base"*) ok "the first commit states the preflight skip instead of blocking" ;;
-  *) bad "first-commit skip stated" "out=$OUT" ;;
-esac
-printf '#!/usr/bin/env bash\necho hi\n' >"$R30/loose.sh"
-git -C "$R30" add loose.sh
-commit_in "$R30" "feat: add loose"
-[ "$RC" -ne 0 ] && ok "a staged fail-open script blocks through preflight" || bad "preflight blocks" "rc=$RC out=$OUT"
-case "$OUT" in
-  *preflight*) ok "preflight names itself in the blocked output" ;;
-  *) bad "preflight names itself" "out=$OUT" ;;
-esac
-git -C "$R30" rm -q --cached loose.sh
-rm -f "$R30/loose.sh"
-
-echo "=== a broken preflight install blocks, never skips ==="
-printf 'more\n' >"$R30/d.txt"
-git -C "$R30" add d.txt
-rm "$R30/.agents/skills/preflight"
-ln -s "$TMP/no-such-skill" "$R30/.agents/skills/preflight"
-commit_in "$R30" "feat: add d"
-[ "$RC" -ne 0 ] && ok "a dangling preflight install blocks" || bad "dangling preflight blocks" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"preflight skill is installed"*) ok "the broken preflight install is named" ;;
-  *) bad "broken preflight named" "out=$OUT" ;;
-esac
-rm "$R30/.agents/skills/preflight"
-commit_in "$R30" "feat: add d"
-[ "$RC" -eq 0 ] && ok "control: an absent preflight is a stated skip" || bad "absent preflight skips" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"preflight not installed — skipped"*) ok "the skip says preflight is not installed" ;;
-  *) bad "skip states preflight not installed" "out=$OUT" ;;
-esac
-
-
-echo "=== a repo-local doc-limits replacement without --staged is a stated skip ==="
-R31="$(new_repo forkchain)"
-# new_repo links doc-limits to the REAL skill; replace the link with a real
-# directory so the fork fixture cannot write through it.
-rm "$R31/.agents/skills/doc-limits"
-mkdir -p "$R31/.agents/skills/doc-limits/scripts"
-cat >"$R31/.agents/skills/doc-limits/scripts/doc-limits" <<'FORK'
-#!/usr/bin/env bash
-# A consumer's own gate: usage text names doc-limits, no --staged mode.
-case "${1:-}" in
-  --help) echo "doc-limits — repo-local gate. Usage: doc-limits"; exit 0 ;;
-  --staged) echo "::error::doc-limits: unknown argument '--staged' (see --help)" >&2; exit 2 ;;
-esac
-exit 0
-FORK
-chmod 0755 "$R31/.agents/skills/doc-limits/scripts/doc-limits"
-install_in "$R31"
-printf 'hello\n' >"$R31/ok.txt"
-git -C "$R31" add ok.txt
-commit_in "$R31" "feat: add ok"
-[ "$RC" -eq 0 ] && ok "a fork without --staged does not block the commit" || bad "fork commit proceeds" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"rejects --staged"*"repo-local replacement"*) ok "the skip states the fork and its ownership" ;;
-  *) bad "fork skip stated" "out=$OUT" ;;
-esac
-
-echo "=== a fork whose --help NAMES --staged but rejects it still skips ==="
-cat >"$R31/.agents/skills/doc-limits/scripts/doc-limits" <<'NEGHELP'
-#!/usr/bin/env bash
-case "${1:-}" in
-  --help) echo "doc-limits — repo-local gate. Usage: doc-limits. This build does not support --staged."; exit 0 ;;
-  --staged) echo "::error::doc-limits: unknown argument '--staged' (see --help)" >&2; exit 2 ;;
-esac
-exit 0
-NEGHELP
-chmod 0755 "$R31/.agents/skills/doc-limits/scripts/doc-limits"
-printf 'neg\n' >"$R31/b.txt"
-git -C "$R31" add b.txt
-commit_in "$R31" "feat: add b"
-[ "$RC" -eq 0 ] && ok "a help-names-it-but-rejects-it fork does not block" || bad "negative-phrase fork proceeds" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"rejects --staged"*"repo-local replacement"*) ok "the runtime rejection is stated as the skip" ;;
-  *) bad "runtime rejection stated" "out=$OUT" ;;
-esac
-
-echo "=== a config-error diagnostic that mentions --staged is not a rejection ==="
-cat >"$R31/.agents/skills/doc-limits/scripts/doc-limits" <<'CFGERR'
-#!/usr/bin/env bash
-case "${1:-}" in
-  --help) echo "doc-limits — gate. Usage: doc-limits [--staged]"; exit 0 ;;
-esac
-echo "::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit (see --help; applies to --staged runs too)" >&2
-exit 2
-CFGERR
-chmod 0755 "$R31/.agents/skills/doc-limits/scripts/doc-limits"
-printf 'cfg\n' >"$R31/e.txt"
-git -C "$R31" add e.txt
-commit_in "$R31" "feat: add e"
-[ "$RC" -ne 0 ] && ok "a config error mentioning --staged still blocks" || bad "config error blocks" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"did not complete"*) ok "the block is the did-not-complete error, never the replacement skip" ;;
-  *) bad "config error named" "out=$OUT" ;;
-esac
-git -C "$R31" rm -q --cached e.txt 2>/dev/null; rm -f "$R31/e.txt"
-
-echo "=== an echoed rejection phrase inside a config diagnostic is not a rejection ==="
-cat >"$R31/.agents/skills/doc-limits/scripts/doc-limits" <<'ECHOED'
-#!/usr/bin/env bash
-case "${1:-}" in
-  --help) echo "doc-limits — gate. Usage: doc-limits [--staged]"; exit 0 ;;
-esac
-echo "::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit, got 'unknown argument '--staged''" >&2
-exit 2
-ECHOED
-chmod 0755 "$R31/.agents/skills/doc-limits/scripts/doc-limits"
-printf 'echoed\n' >"$R31/f.txt"
-git -C "$R31" add f.txt
-commit_in "$R31" "feat: add f"
-[ "$RC" -ne 0 ] && ok "an echoed phrase in a config diagnostic still blocks" || bad "echoed phrase blocks" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"did not complete"*) ok "the echoed-phrase block is did-not-complete, never the replacement skip" ;;
-  *) bad "echoed phrase named" "out=$OUT" ;;
-esac
-git -C "$R31" rm -q --cached f.txt 2>/dev/null; rm -f "$R31/f.txt"
-
-echo "=== a broken script erroring at run time blocks, never skips ==="
-cat >"$R31/.agents/skills/doc-limits/scripts/doc-limits" <<'BROKEN'
-#!/usr/bin/env bash
-echo "doc-limits: cannot source lib/settings.sh" >&2
-exit 2
-BROKEN
-chmod 0755 "$R31/.agents/skills/doc-limits/scripts/doc-limits"
-printf 'more\n' >"$R31/d.txt"
-git -C "$R31" add d.txt
-commit_in "$R31" "feat: add d"
-[ "$RC" -ne 0 ] && ok "a broken script blocks the commit" || bad "broken script blocks" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"did not complete"*) ok "the block is did-not-complete, never a replacement skip" ;;
-  *) bad "broken install named" "out=$OUT" ;;
-esac
-
-echo "=== the helper does not run a package beside an external git dir ==="
-# `${common%/*}` is the main checkout only in the ordinary <main>/.git
-# layout. Under --separate-git-dir the git directory lives outside the
-# checkout, so that is an unrelated directory — and one carrying its own
-# commit-guards ran here as the repository's commit gate.
-OUT_DIR="$TMP/separate"
-mkdir -p "$OUT_DIR"
-git init -q --separate-git-dir "$OUT_DIR/elsewhere.git" "$OUT_DIR/checkout"
-git -C "$OUT_DIR/checkout" config user.email t@t
-git -C "$OUT_DIR/checkout" config user.name t
-
-# A decoy beside the git directory, which is what `${common%/*}` names.
-DECOY="$OUT_DIR/.agents/skills/commit-guards/scripts"
-mkdir -p "$DECOY"
-for lane in pre-commit commit-msg; do
-  printf '#!/bin/sh\ntouch %s\nexit 0\n' "$TMP/decoy-ran" >"$DECOY/$lane"
-  chmod +x "$DECOY/$lane"
-done
-
-# The real package installs from inside the checkout, then the baked path is
-# blanked so the helper has to rediscover — which is the search under test.
-mkdir -p "$OUT_DIR/checkout/.agents/skills"
-cp -R "$SKILL_DIR" "$OUT_DIR/checkout/.agents/skills/commit-guards"
-OUT=""; RC=0
-OUT="$("$OUT_DIR/checkout/.agents/skills/commit-guards/scripts/install-git-hooks" \
-  --repo "$OUT_DIR/checkout" 2>&1)" || RC=$?
-[ "$RC" -eq 0 ] && ok "install succeeds under a separate git dir" \
-  || bad "separate-git-dir install" "rc=$RC out=$OUT"
-
-HELPER="$OUT_DIR/elsewhere.git/hooks/kendex-guards"
-[ -f "$HELPER" ] || HELPER="$OUT_DIR/checkout/.git/hooks/kendex-guards"
-sed -i.bak "s|^installed_scripts=.*|installed_scripts=''|" "$HELPER"
-rm -f "$HELPER.bak"
-
-MARK="TO""DO"
-printf '# %s: nope\n' "$MARK" >"$OUT_DIR/checkout/b.py"
-git -C "$OUT_DIR/checkout" add -A
-OUT=""; RC=0
-OUT="$(cd "$OUT_DIR/checkout" && git commit -m "feat: separate" 2>&1)" || RC=$?
-[ -e "$TMP/decoy-ran" ] \
-  && bad "the decoy beside the git dir ran as the gate" "out=$OUT" \
-  || ok "a package beside the external git dir is not this repository's"
-[ "$RC" -ne 0 ] && ok "and the commit is blocked rather than passed" \
-  || bad "commit passed with no gate" "rc=$RC out=$OUT"
-
-echo "=== a package INSIDE the work tree is not the main checkout ==="
-# git resolves upward, so the ownership test — does this candidate's common
-# git dir match ours — says yes about every directory inside our own work
-# tree. A git directory at <checkout>/meta/repo.git makes `${common%/*}`
-# name <checkout>/meta, which passes ownership and is not a checkout root at
-# all; a commit-guards under it would run as this repository's gate. Being
-# the root is the second test: git's top level from there has to be there.
-IN_DIR="$TMP/inside"
-mkdir -p "$IN_DIR/meta"
-git init -q --separate-git-dir "$IN_DIR/meta/repo.git" "$IN_DIR"
-git -C "$IN_DIR" config user.email t@t
-git -C "$IN_DIR" config user.name t
-printf 'meta/\n.agents/\n' >"$IN_DIR/.gitignore"
-
-# The decoy sits where `${common%/*}` points: inside our own work tree.
-DECOY2="$IN_DIR/meta/.agents/skills/commit-guards/scripts"
-mkdir -p "$DECOY2"
-for lane in pre-commit commit-msg; do
-  printf '#!/bin/sh\ntouch %s\nexit 0\n' "$TMP/inside-decoy-ran" >"$DECOY2/$lane"
-  chmod +x "$DECOY2/$lane"
-done
-
-mkdir -p "$IN_DIR/.agents/skills"
-cp -R "$SKILL_DIR" "$IN_DIR/.agents/skills/commit-guards"
-OUT=""; RC=0
-OUT="$("$IN_DIR/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$IN_DIR" 2>&1)" || RC=$?
-[ "$RC" -eq 0 ] && ok "a git dir inside its own work tree installs" \
-  || bad "inside-git-dir install" "rc=$RC out=$OUT"
-
-# The baked path is blanked so the helper has to rediscover, which is the
-# search under test.
-HELPER2="$IN_DIR/meta/repo.git/hooks/kendex-guards"
-[ -f "$HELPER2" ] || HELPER2="$IN_DIR/.git/hooks/kendex-guards"
-sed -i.bak "s|^installed_scripts=.*|installed_scripts=''|" "$HELPER2"
-rm -f "$HELPER2.bak"
-
-MARK2="TO""DO"
-printf '# %s: nope\n' "$MARK2" >"$IN_DIR/b.py"
-git -C "$IN_DIR" add -A
-OUT=""; RC=0
-OUT="$(cd "$IN_DIR" && git commit -m "feat: inside" 2>&1)" || RC=$?
-[ -e "$TMP/inside-decoy-ran" ] \
-  && bad "a package under the git dir's parent ran as the gate" "out=$OUT" \
-  || ok "a directory inside the work tree is not its main checkout"
-[ "$RC" != "0" ] && ok "and the real package gated the commit" \
-  || bad "commit passed with no gate" "rc=$RC out=$OUT"
-
-echo "=== a linked worktree is still served by the main checkout ==="
-# The ownership check must not cost the ordinary case: git answers
-# --git-common-dir relative to where it is asked, so comparing it unresolved
-# would drop the real main checkout and strand every linked worktree.
-R90="$(new_repo linked-main)"
-install_in "$R90"
-printf 'hello\n' >"$R90/a.txt"
-git -C "$R90" add -A
-commit_in "$R90" "feat: base"
-git -C "$R90" worktree add -q "$TMP/wt9" -b wt9b
-sed -i.bak "s|^installed_scripts=.*|installed_scripts=''|" "$R90/.git/hooks/kendex-guards"
-rm -f "$R90/.git/hooks/kendex-guards.bak"
-printf '# %s: nope\n' "$MARK" >"$TMP/wt9/c.py"
-git -C "$TMP/wt9" add -A
-OUT=""; RC=0
-OUT="$(cd "$TMP/wt9" && git commit -m "feat: linked" 2>&1)" || RC=$?
-case "$OUT" in
-  *todo-ban*) ok "the worktree rediscovers the main checkout's package" ;;
-  *"no executable commit-guards"*) bad "the ownership check stranded a linked worktree" "$OUT" ;;
-  *) bad "the linked worktree commit did not reach the chain" "$OUT" ;;
-esac
-[ "$RC" -ne 0 ] && ok "and its verdict blocks the commit" \
-  || bad "linked worktree commit passed" "rc=$RC out=$OUT"
+echo "=== a repo-local doc-limits replacement is a stated skip only when its parser rejects --staged ==="
+# new_repo links doc-limits to the real skill; a fork fixture replaces the
+# link with a directory of its own so nothing writes through it.
+fork() { # NAME BODY — a consumer's own doc-limits in place of the skill
+  armed "$1"
+  rm "$R/.agents/skills/doc-limits"
+  mkdir -p "$R/.agents/skills/doc-limits/scripts"
+  printf '%b' "$2" >"$R/.agents/skills/doc-limits/scripts/doc-limits"
+  chmod 0755 "$R/.agents/skills/doc-limits/scripts/doc-limits"
+  stage ok.txt 'hello\n'
+}
+REJECTS='#!/usr/bin/env bash\ncase "${1:-}" in\n  --staged) echo "::error::doc-limits: unknown argument '"'"'--staged'"'"' (see --help)" >&2; exit 2 ;;\nesac\nexit 0\n'
+ECHOED='#!/usr/bin/env bash\necho "::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit; a run would say doc-limits: unknown argument '"'"'--staged'"'"' (see --help)" >&2\nexit 2\n'
+VERDICT='#!/usr/bin/env bash\necho "doc-limits: FAIL ok.txt over its ceiling"\nexit 1\n'
+fx_fork_rejects() { fork fork-rejects "$REJECTS"; }
+# The other four spellings of the grammar, one parser each, without the
+# annotation prefix.
+spelling() { fork "$1" '#!/usr/bin/env bash\ncase "${1:-}" in\n  --staged) echo "'"$2"'" >&2; exit 2 ;;\nesac\nexit 0\n'; } # NAME LINE
+fx_fork_unrecognized_quoted() { spelling fork-unrecognized-quoted "doc-limits: unrecognized option '"'"'--staged'"'"'"; }
+fx_fork_unrecognized_colon() { spelling fork-unrecognized-colon "doc-limits: unrecognized option: --staged"; }
+fx_fork_invalid_colon() { spelling fork-invalid-colon "doc-limits: invalid option: --staged"; }
+fx_fork_invalid_dashes() { spelling fork-invalid-dashes "doc-limits: invalid option -- staged"; }
+fx_fork_echoed() { fork fork-echoed "$ECHOED"; }
+fx_fork_verdict() { fork fork-verdict "$VERDICT"; }
+FORK_SKIP="=== pre-commit: doc-limits at <repo>/.agents/skills/doc-limits/scripts/doc-limits rejects --staged (repo-local replacement) — skipped; this repo's own wiring owns that gate"
+run_rows \
+  "a fork whose parser rejects --staged is skipped and the commit proceeds|fx_fork_rejects|$ONE|commit|feat: add ok|rc=0 $DL;::error::doc-limits: unknown argument '--staged' (see --help);$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a parser saying unrecognized option '--staged' is the same skip|fx_fork_unrecognized_quoted|$ONE|commit|feat: add ok|rc=0 $DL;$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a parser saying unrecognized option: --staged is the same skip|fx_fork_unrecognized_colon|$ONE|commit|feat: add ok|rc=0 $DL;$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a parser saying invalid option: --staged is the same skip|fx_fork_invalid_colon|$ONE|commit|feat: add ok|rc=0 $DL;$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a parser saying invalid option -- staged is the same skip|fx_fork_invalid_dashes|$ONE|commit|feat: add ok|rc=0 $DL;$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "must-fail: the whole rejection phrase inside a config diagnostic is not a rejection, and the step did not complete|fx_fork_echoed|$ONE|commit|feat: add ok|rc=1 $DL;::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit; a run would say doc-limits: unknown argument '--staged' (see --help);pre-commit: step 'doc-limits' did not complete (exit 2);$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$ERRORS|" \
+  "a fork's own verdict blocks like the skill's|fx_fork_verdict|$ONE|commit|feat: add ok|rc=1 $DL;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$BLOCKED|"
 
 echo "=== a project name survives every byte it may hold ==="
 # The project the helper was armed from is baked into it as a shell
-# assignment. A name carrying a quote ends that assignment and the rest of
-# the name becomes script: a directory called `kid'"'"'; exit 0; #` once baked
-# a helper that exited 0 before running anything, so both hooks passed every
-# commit. A name carrying a newline spans lines instead.
-#
-# So the pin uses a name holding one of each awkward class at once: tab,
-# newline, space, a quote, glob characters and a percent sign.
+# assignment, and a name carrying a quote once ended that assignment early
+# and passed every commit. One name holds each awkward class at once: tab,
+# newline, space, a quote, glob characters and a percent sign. The newline
+# and the quote are the classes these rows separate (the kept lines end at
+# the newline, the quote goes through the POSIX escape); the rest ride
+# along so a regression in any of them still shows here.
 TAB="$(printf '\t')"
-SQ="'"
-NASTY="p${TAB}q r${SQ}s*?[x]%25"
-NLR="$TMP/alphabet"
-mkdir -p "$NLR"
-git -C "$NLR" init -q
-git -C "$NLR" config user.email t@t
-git -C "$NLR" config user.name t
-PROJ="$NLR/$NASTY
+NASTY="p${TAB}q r's*?[x]%25"
+nasty() { # NAME — a repository whose project, and its render, sit under the awkward name
+  R="$TMP/$1"
+  mkdir -p "$R"
+  git -C "$R" init -q
+  identity "$R"
+  INSTALLER_DIR="$R/$NASTY
 "
-mkdir -p "$PROJ/.agents/skills"
-cp -R "$SKILL_DIR" "$PROJ/.agents/skills/commit-guards"
-INST="$PROJ/.agents/skills/commit-guards/scripts/install-git-hooks"
+  render_into "$INSTALLER_DIR"
+}
+nasty_armed() { nasty "$1"; "$INSTALLER_DIR/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true; }
+fx_nasty_install() { nasty nasty-install; }
+fx_nasty_check() { nasty_armed nasty-check; }
+fx_nasty_commit() { nasty_armed nasty-commit; blank_baked; printf '.gitignore\n' >"$R/.gitignore"; stage_marker; }
+fx_nasty_uninstall() { nasty_armed nasty-uninstall; }
+# The chain's skip lines name the project directory, whose newline ends the
+# kept line where the name ends.
+nasty_skip() { printf '=== pre-commit: %s not installed — skipped (no %s skill under <repo> and <repo>/%s (%s), nor at <repo>/%s' "$1" "$1" "$NASTY" "$ROOTS" "$NASTY"; } # LANE
+NASTY_LANES="$DL;$(nasty_skip preflight);$(nasty_skip bot-instructions);$BATCH;$LOCAL_NONE"
+run_rows \
+  "a project named with every awkward class arms|fx_nasty_install||install||rc=0 $ARMED|" \
+  "and --check recognises the helper it wrote|fx_nasty_check||check||rc=0 commit-guards git hooks: armed — pre-commit and commit-msg gate commits in <repo>/.git/hooks|" \
+  "and the helper rediscovers the package under that project name, whose chain blocks|fx_nasty_commit|$ONE|commit|feat: add b|rc=1 $NASTY_LANES;$BLOCKED|" \
+  "and the project can disarm again|fx_nasty_uninstall||uninstall||rc=0 $REMOVED_BOTH|helper=absent pre-commit=absent commit-msg=absent hooksPath=<unset>"
 
-OUT=""; RC=0
-OUT="$("$INST" --repo "$NLR" 2>&1)" || RC=$?
-[ "$RC" -eq 0 ] && ok "a project named with every awkward class arms" \
-  || bad "awkward-name arm" "rc=$RC out=$OUT"
-
-# --check regenerates the helper and compares bytes, so a name that did not
-# survive the trip reports the helper as not ours.
-OUT=""; RC=0
-OUT="$("$INST" --repo "$NLR" --check 2>&1)" || RC=$?
-[ "$RC" -eq 0 ] && ok "and --check still recognises its own helper" \
-  || bad "the record did not round-trip" "rc=$RC out=$OUT"
-
-OUT=""; RC=0
-OUT="$("$INST" --repo "$NLR" --uninstall 2>&1)" || RC=$?
-[ "$RC" -eq 0 ] && ok "and the project can disarm again" \
-  || bad "awkward-name uninstall" "rc=$RC out=$OUT"
-[ -e "$NLR/.git/hooks/kendex-guards" ] \
-  && bad "the shims survived their own uninstall" "out=$OUT" \
-  || ok "with the shims gone"
-
+assert_eq "every seeded fixture landed its seed commit" "" "$SEEDS_FAILED"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -152,26 +152,36 @@ KEEP='^(commit-guards git hooks: |::warning::install-git-hooks: |::error::|kende
 # One line for a run inside the row's repository: the exit status, then
 # every kept line in order joined by ';'. ENVS is a comma-separated list of
 # assignments. ACTION is install, check or uninstall (the installer the
-# repository carries, every line kept), commit (a real `git commit -m ARG`
-# from the checkout, the kept lines only) or hook (the pre-commit shim run
-# from the repository root, the way git runs it, the kept lines only).
+# repository carries, every line kept; ARG carries any further installer
+# arguments, word-split), commit (a real `git commit -m ARG` from the checkout's physical path, the
+# kept lines only), commit-here (the same from the path as the fixture
+# spelled it) or hook (the pre-commit shim run from the repository root,
+# the way git runs it, the kept lines only). A fixture that keeps its render
+# somewhere other than the checkout root names that directory in
+# INSTALLER_DIR.
 run() { # ENVS ACTION ARG
   local envs=() rc=0 out="" installer="" filtered=1 dir="" target="$R"
   [ -z "$1" ] || IFS=',' read -ra envs <<<"$1"
   # An action ending in -wt runs the installer the other checkout carries
   # (a linked worktree, or a second project in the repository), against it.
   case "$2" in *-wt) target="$W" ;; esac
-  installer="$target/.agents/skills/commit-guards/scripts/install-git-hooks"
+  installer="${INSTALLER_DIR:-$target}/.agents/skills/commit-guards/scripts/install-git-hooks"
+  # A named checkout without an installer is a fixture error, never a
+  # quiet run of the source tree's.
+  [ -z "$INSTALLER_DIR" ] || [ -x "$installer" ] || { echo "harness: no installer under $INSTALLER_DIR" >&2; exit 2; }
   [ -x "$installer" ] || installer="$INSTALL"
   # A commit runs from the checkout's physical path, the ordinary layout:
   # reached through a symlink, the helper drops the main-checkout root it
-  # cannot vouch for and its search line changes, which is the scope
-  # suite's subject, not this one's.
-  dir="$(cd -- "${W:-$R}" && pwd -P)"
+  # cannot vouch for, which commit-here is for.
+  dir="$(cd -- "${W:-$R}" 2>/dev/null && pwd -P)" || dir="${W:-$R}"
   case "$2" in
     install | install-wt)
       filtered=0
-      out="$(env ${envs[@]+"${envs[@]}"} "$installer" --repo "$target" 2>&1)" || rc=$?
+      # shellcheck disable=SC2086
+      out="$(env ${envs[@]+"${envs[@]}"} "$installer" --repo "$target" $3 2>&1)" || rc=$?
+      ;;
+    commit-here)
+      out="$(cd -- "${W:-$R}" && env ${envs[@]+"${envs[@]}"} git commit -m "$3" 2>&1)" || rc=$?
       ;;
     check | check-wt)
       # ARG carries any further installer arguments, word-split.
@@ -347,8 +357,10 @@ run_rows() { # label | fixture | env | action | arg | expect | state
     R=""
     W=""
     UNDO=""
+    INSTALLER_DIR=""
     "$fx"
-    R_PHYS="$(cd -- "$R" && pwd -P)"
+    # A row over a path that is not there (a usage row) aliases it as spelled.
+    R_PHYS="$(cd -- "$R" 2>/dev/null && pwd -P)" || R_PHYS="$R"
     assert_eq "$label" "$expect" "$(run "$env" "$action" "$arg")"
     [ -z "$want_state" ] || assert_eq "$label: the hooks directory" "$want_state" "$(state)"
     [ -z "$UNDO" ] || eval "$UNDO"
