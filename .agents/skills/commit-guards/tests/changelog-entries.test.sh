@@ -114,6 +114,7 @@ fx_unwrapped_over() { repo unwrapped-over; frag fixed w.md "- $A60 $A60 $A60 $(r
 fx_cr() { repo cr; frag fixed cr.md "- $X198\r\n"; }
 fx_trailing() { repo trailing; frag fixed t.md "- $X198   \t  \n"; }
 fx_runs() { repo runs; frag fixed r.md "- $(rep x 100)     $(rep x 97)\n"; }
+fx_blank_first() { repo blank-first; frag fixed b.md "   \n- $X205\n"; }
 fx_runs_over() { repo runs-over; frag fixed r.md "- $(rep x 100)     $(rep x 98)\n"; }
 fx_dashes() { repo dashes; frag fixed d.md "- $(rep '—' 198)\n"; }
 fx_dashes_over() { repo dashes-over; frag fixed d.md "- $(rep '—' 199)\n"; }
@@ -128,6 +129,7 @@ fx_stray_bytes() {
 # sequence a byte-range check would accept.
 fx_surrogate() { repo surrogate; frag fixed s.md '- valid\n  \0355\0240\0200\n'; }
 fx_overlong() { repo overlong; frag fixed o.md '- valid\n  \0300\0200\n'; }
+fx_two_bad() { repo two-bad; frag fixed t.md '- valid\n  \0277\n  \0277\n'; }
 run_rows \
   "no fragment tree is a clean pass naming the paths it looked for|fx_none|||rc=0 $NOMATCH" \
   "an over-cap fragment fails naming file, length and cap, quotes its first line, carries the remedy, and the short one beside it is only counted|fx_over|||rc=1 $(long changelog.d/fixed/long.md 207 "- $X205");$(summary 1 2)" \
@@ -142,28 +144,34 @@ run_rows \
   "trailing whitespace spends no cap|fx_trailing|||rc=0 $(within 1)" \
   "an interior whitespace run collapses to one character|fx_runs|||rc=0 $(within 1)" \
   "control: the collapsed run leaves exactly one character to overflow, and the quoted first line keeps its raw spacing|fx_runs_over|||rc=1 $(long changelog.d/fixed/r.md 201 "- $(rep x 100)     $(rep x 98)");$(summary 1 1)" \
+  "a whitespace-only line above the entry is not the quoted line|fx_blank_first|||rc=1 $(long changelog.d/fixed/b.md 207 "- $X205");$(summary 1 1)" \
   "200 em dashes are 200 characters, not 596 bytes|fx_dashes|||rc=0 $(within 1)" \
   "control: one em dash more is one character more|fx_dashes_over|||rc=1 $(long changelog.d/fixed/d.md 201 "- $(rep '—' 199)");$(summary 1 1)" \
   "a line that is not valid UTF-8 has no character count: a collection error naming the line, never a measurement|fx_stray_bytes|||rc=2 ${ERR}changelog.d/fixed/stray.md line 2 is not valid UTF-8 — text with no character count cannot be measured" \
   "a UTF-16 surrogate encoded as three bytes is not valid UTF-8|fx_surrogate|||rc=2 ${ERR}changelog.d/fixed/s.md line 2 is not valid UTF-8 — text with no character count cannot be measured" \
-  "an overlong two-byte encoding is not valid UTF-8|fx_overlong|||rc=2 ${ERR}changelog.d/fixed/o.md line 2 is not valid UTF-8 — text with no character count cannot be measured"
+  "an overlong two-byte encoding is not valid UTF-8|fx_overlong|||rc=2 ${ERR}changelog.d/fixed/o.md line 2 is not valid UTF-8 — text with no character count cannot be measured" \
+  "the first invalid line is named, and only it|fx_two_bad|||rc=2 ${ERR}changelog.d/fixed/t.md line 2 is not valid UTF-8 — text with no character count cannot be measured"
 
 echo "=== a fragment is exactly one list item, or it is refused ==="
 fx_empty() { repo empty; frag fixed e.md ''; }
 fx_blank() { repo blank; frag fixed e.md '\n\n'; }
 fx_marker_only() { repo marker-only; frag fixed e.md '- \n'; }
 fx_prose() { repo prose; frag fixed e.md 'Not a list item.\n'; }
+fx_no_space() { repo no-space; frag fixed e.md '-No space after the hyphen.\n'; }
 fx_two_items() { repo two-items; frag fixed e.md '- First entry.\n- Second entry.\n'; }
 fx_heading() { repo heading; frag fixed e.md '- An entry.\n\n## [9.9.9] - 2026-01-01\n'; }
 fx_continued() { repo continued; frag fixed e.md '- An entry\n  continued over\n  three lines.\n'; }
+fx_tab_continued() { repo tab-continued; frag fixed e.md '- An entry\n\tcontinued under a tab.\n'; }
 run_rows \
   "a zero-byte fragment is refused, naming it|fx_empty|||rc=1 $(shape changelog.d/fixed/e.md "$NO_ENTRY");$(summary 1 0)" \
   "a whitespace-only fragment is refused|fx_blank|||rc=1 $(shape changelog.d/fixed/e.md "$NO_ENTRY");$(summary 1 0)" \
   "a marker with nothing after it is refused|fx_marker_only|||rc=1 $(shape changelog.d/fixed/e.md "$NO_ENTRY");$(summary 1 0)" \
   "a fragment opening with prose is refused|fx_prose|||rc=1 $(shape changelog.d/fixed/e.md "$NO_MARKER");$(summary 1 0)" \
+  "a hyphen with no space after it is not a list marker|fx_no_space|||rc=1 $(shape changelog.d/fixed/e.md "$NO_MARKER");$(summary 1 0)" \
   "two list items in one fragment are refused|fx_two_items|||rc=1 $(shape changelog.d/fixed/e.md "$MORE_THAN_ONE");$(summary 1 0)" \
   "a heading inside a fragment is refused rather than ending the section it folds into|fx_heading|||rc=1 $(shape changelog.d/fixed/e.md "$MORE_THAN_ONE");$(summary 1 0)" \
-  "control: indented continuation lines are the one entry|fx_continued|||rc=0 $(within 1)"
+  "control: indented continuation lines are the one entry|fx_continued|||rc=0 $(within 1)" \
+  "a tab-indented continuation line is the one entry too|fx_tab_continued|||rc=0 $(within 1)"
 
 echo "=== a fragment sits directly under a section directory, at its pattern's depth ==="
 # Keep a Changelog's six, written out rather than read from the check's own
@@ -196,6 +204,7 @@ fx_tree_notes() { tree tree-notes; put changelog.d/fixed/notes 'whatever\n'; sta
 fx_tree_symlink() { tree tree-symlink; ln -s ../../CHANGELOG.md "$R/changelog.d/fixed/notes"; stage; }
 fx_tree_top() { tree tree-top; put changelog.d/oops.md '- Stray.\n'; stage; }
 fx_tree_orig() { tree tree-orig; put changelog.d/fixed/ken-1.md.orig '- A fragment.\n'; stage; }
+fx_tree_sibling() { tree tree-sibling; put changelog.d-archive/old.md '- Not under the root.\n'; stage; }
 fx_tree_readme_below() { tree tree-readme-below; put changelog.d/fixed/README.md '# notes\n'; stage; }
 # A pattern carrying no glob names one file, and naming one file is not
 # naming the directory it sits in, so it roots nowhere and sweeps nothing.
@@ -221,6 +230,7 @@ run_rows \
   "a symlink the globs do not cover is refused the same way, never followed|fx_tree_symlink|||rc=1 $(stray changelog.d/fixed/notes);$(summary 1 1)" \
   "a stray at the top of the tree is refused|fx_tree_top|||rc=1 $(stray changelog.d/oops.md);$(summary 1 1)" \
   "a name that merely begins like a fragment's is a stray: the glob matches the whole path|fx_tree_orig|||rc=1 $(stray changelog.d/fixed/ken-1.md.orig);$(summary 1 1)" \
+  "a sibling directory sharing the root's prefix is outside the tree|fx_tree_sibling|||rc=0 $(within 1)" \
   "a README below a section directory is a fragment position and is judged|fx_tree_readme_below|||rc=1 $(shape changelog.d/fixed/README.md "$NO_MARKER");$(summary 1 1)" \
   "an exact-path pattern roots nowhere and sweeps nothing beside it|fx_exact_path|COMMIT_GUARDS_CHANGELOG_PATHS=changelog.d/added/only.md||rc=1 $(long changelog.d/added/only.md 252 "- $X250");$(summary 1 1)" \
   "control: a globbed pattern over the same directory does root there and sweeps the neighbour|fx_exact_path_control|COMMIT_GUARDS_CHANGELOG_PATHS=changelog.d/added/*.md||rc=1 $(stray changelog.d/added/beside.txt 'changelog.d/added/*.md');$(long changelog.d/added/only.md 252 "- $X250");$(summary 2 1)" \
@@ -254,29 +264,31 @@ fx_gitlink() { repo gitlink; frag fixed real.md '- A real entry.\n'; git -C "$R"
 # Every byte value, so a NUL falls inside the sample git classifies on; awk
 # writes them under LC_ALL=C so a value is a byte and not a character.
 fx_binary() { repo binary; mkdir -p "$R/changelog.d/fixed"; { printf -- '- '; LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) printf "%c", i }'; } >"$R/changelog.d/fixed/bin.md"; stage; }
-# git classifies on the leading bytes alone, and so does this check: a NUL
-# past that sample is a blob both call text, refused as the byte it is.
-fx_late_nul() { repo late-nul; mkdir -p "$R/changelog.d/added"; { printf -- '- '; rep x 8100; LC_ALL=C awk 'BEGIN { printf "%c", 0 }'; printf 'tail\n'; } >"$R/changelog.d/added/late-nul.md"; stage; }
-# A NUL deep inside the sample, past what a shorter sample would read.
-fx_mid_nul() { repo mid-nul; mkdir -p "$R/changelog.d/added"; { printf -- '- '; rep x 6000; LC_ALL=C awk 'BEGIN { printf "%c", 0 }'; printf 'tail\n'; } >"$R/changelog.d/added/mid-nul.md"; stage; }
+# git classifies on the leading 8000 bytes alone, and so does this check: a
+# NUL at byte offset 8000, the first past that sample, is a blob both call
+# text, refused as the byte it is; one at offset 7999, the sample's last
+# byte, is binary. The marker takes two bytes, so the run of x is two short.
+nul_at() { mkdir -p "$R/changelog.d/added"; { printf -- '- '; rep x "$(($1 - 2))"; LC_ALL=C awk 'BEGIN { printf "%c", 0 }'; printf 'tail\n'; } >"$R/changelog.d/added/$2"; } # OFFSET NAME
+fx_late_nul() { repo late-nul; nul_at 8000 late-nul.md; stage; }
+fx_last_nul() { repo last-nul; nul_at 7999 last-nul.md; stage; }
 fx_high_bytes() { repo high-bytes; frag fixed h.md "- $(rep '—' 250)\n"; }
 run_rows \
   "a tracked symlink is refused, not followed and not skipped|fx_symlink|||rc=1 changelog-entries FAIL changelog.d/fixed/link.md is tracked as a symlink;  a fragment is a file of its own;$(summary 1 1)" \
   "control: the same tree without the link passes|fx_symlink_control|||rc=0 $(within 1)" \
   "a submodule gitlink is refused, not read as a file|fx_gitlink|||rc=1 changelog-entries FAIL changelog.d/fixed/sub.md is tracked as a submodule gitlink;  a fragment is a file of its own;$(summary 1 1)" \
   "a binary blob is refused, not measured as text|fx_binary|||rc=1 changelog-entries FAIL changelog.d/fixed/bin.md holds binary content;  a fragment is the Markdown list item it becomes;$(summary 1 0)" \
-  "a blob git calls text with a NUL past its sample is read as text, and the byte is refused rather than the file|fx_late_nul|||rc=2 ${ERR}changelog.d/added/late-nul.md line 1 is not valid UTF-8 — text with no character count cannot be measured" \
-  "a NUL deep inside the sample is binary: the sample is git's whole 8000 bytes|fx_mid_nul|||rc=1 changelog-entries FAIL changelog.d/added/mid-nul.md holds binary content;  a fragment is the Markdown list item it becomes;$(summary 1 0)" \
+  "a blob git calls text, its NUL the first byte past the sample, is read as text, and the byte is refused rather than the file|fx_late_nul|||rc=2 ${ERR}changelog.d/added/late-nul.md line 1 is not valid UTF-8 — text with no character count cannot be measured" \
+  "control: a NUL at the sample's last byte is binary|fx_last_nul|||rc=1 changelog-entries FAIL changelog.d/added/last-nul.md holds binary content;  a fragment is the Markdown list item it becomes;$(summary 1 0)" \
   "control: NUL-free high bytes are text and are measured|fx_high_bytes|||rc=1 $(long changelog.d/fixed/h.md 252 "- $(rep '—' 250)");$(summary 1 1)"
-# git itself calls the leading-NUL and mid-NUL blobs binary and the late-NUL
-# blob text, which is the agreement the three rows above pin.
+# git itself calls the leading-NUL and last-byte blobs binary and the
+# first-past blob text, which is the agreement the three rows above pin.
 repo git-classifies
-mkdir -p "$R/changelog.d/fixed" "$R/changelog.d/added"
+mkdir -p "$R/changelog.d/fixed"
 { printf -- '- '; LC_ALL=C awk 'BEGIN { for (i = 0; i < 256; i++) printf "%c", i }'; } >"$R/changelog.d/fixed/bin.md"
-{ printf -- '- '; rep x 6000; LC_ALL=C awk 'BEGIN { printf "%c", 0 }'; printf 'tail\n'; } >"$R/changelog.d/added/mid-nul.md"
-{ printf -- '- '; rep x 8100; LC_ALL=C awk 'BEGIN { printf "%c", 0 }'; printf 'tail\n'; } >"$R/changelog.d/added/late-nul.md"
+nul_at 7999 last-nul.md
+nul_at 8000 late-nul.md
 stage
-assert_eq "fixture: git calls the leading-NUL and mid-NUL blobs binary and the late-NUL blob text" "changelog.d/added/late-nul.md" "$(git -C "$R" grep --cached -I -l . -- changelog.d)"
+assert_eq "fixture: git calls the leading-NUL and last-byte blobs binary and the first-past blob text" "changelog.d/added/late-nul.md" "$(git -C "$R" grep --cached -I -l . -- changelog.d)"
 
 echo "=== control bytes never reach the terminal through a diagnostic ==="
 # Every C0 control except tab, and DEL: a tab is whitespace the entry may
@@ -345,25 +357,50 @@ fx_unmerged() {
   git -C "$R" commit -qm ours
   git -C "$R" merge -q other >/dev/null 2>&1 || true
 }
+# The refusal is index-wide: an unmerged path no glob reaches still stops
+# the run, since every record of the index passes through the walk.
+fx_unmerged_outside() {
+  repo unmerged-outside
+  frag fixed a.md '- Fine.\n'
+  put notes.txt 'base\n'
+  stage
+  git -C "$R" commit -qm base
+  git -C "$R" checkout -qb other
+  put notes.txt 'theirs\n'
+  stage
+  git -C "$R" commit -qm theirs
+  git -C "$R" checkout -q main
+  put notes.txt 'ours\n'
+  stage
+  git -C "$R" commit -qm ours
+  git -C "$R" merge -q other >/dev/null 2>&1 || true
+}
 run_rows \
   "a staged fragment absent from the work tree is still measured|fx_staged_gone|||rc=1 $(long changelog.d/fixed/long.md 252 "- $X250");$(summary 1 2)" \
   "an untracked decoy under the same glob is never measured|fx_untracked_decoy|||rc=1 $(long changelog.d/fixed/long.md 252 "- $X250");$(summary 1 2)" \
   "an unstaged worktree edit is not judged|fx_unstaged_edit|||rc=0 $(within 1)" \
   "control: staging the same edit does fail it|fx_staged_edit|||rc=1 $(long changelog.d/fixed/a.md 252 "- $X250");$(summary 1 1)" \
-  "an unmerged fragment is refused before the walk, never read stage by stage|fx_unmerged|||rc=2 changelog.d/fixed/a.md;${ERR}the index carries 1 unmerged path(s) (listed above) and a --cached scan skips them silently — finish or abort the merge, then re-run"
+  "an unmerged fragment is refused before the walk, never read stage by stage|fx_unmerged|||rc=2 changelog.d/fixed/a.md;${ERR}the index carries 1 unmerged path(s) (listed above) and a --cached scan skips them silently — finish or abort the merge, then re-run" \
+  "an unmerged path outside every glob refuses the run the same way|fx_unmerged_outside|||rc=2 notes.txt;${ERR}the index carries 1 unmerged path(s) (listed above) and a --cached scan skips them silently — finish or abort the merge, then re-run"
 
 echo "=== hostile bytes in a name or a pattern never leave their line ==="
-# A tracked filename carrying a newline and an ESC: both are legal bytes in
-# a path, and both decide what a message does if they reach one raw. The
+# A tracked filename carrying a newline, an ESC and a tab: all three are
+# legal bytes in a path; the first two decide what a message does if they
+# reach one raw, and the tab is the byte that ends the path field of an
+# ls-files record, so a walk splitting on the wrong tab loses the file. The
 # name reaches the verdict through %q, so the four lines stay four.
-HOSTILE="$(printf 'KEN\n1\033X.md')"
+HOSTILE="$(printf 'KEN\n1\033X\t.md')"
 fx_hostile_name() { repo hostile-name; mkdir -p "$R/changelog.d/fixed"; printf -- '- %s\n' "$X250" >"$R/changelog.d/fixed/$HOSTILE"; stage; }
 fx_hostile_stray() { repo hostile-stray; mkdir -p "$R/changelog.d/fixed"; printf -- '- Fine.\n' >"$R/changelog.d/fixed/${HOSTILE%.md}"; stage; }
 fx_hostile_pattern() { repo hostile-pattern; frag fixed ok.md '- Fine.\n'; }
 run_rows \
-  "the entry under the hostile name is measured, and the verdict stays on its four lines|fx_hostile_name|||rc=1 $(long "\$'changelog.d/fixed/KEN\\n1\\EX.md'" 252 "- $X250");$(summary 1 1)" \
-  "a refusal names the hostile path the same way, on its own line|fx_hostile_stray|||rc=1 $(stray "\$'changelog.d/fixed/KEN\\n1\\EX'");$(summary 1 0)" \
+  "the entry under the hostile name is measured, and the verdict stays on its four lines|fx_hostile_name|||rc=1 $(long "\$'changelog.d/fixed/KEN\\n1\\EX\\t.md'" 252 "- $X250");$(summary 1 1)" \
+  "a refusal names the hostile path the same way, on its own line|fx_hostile_stray|||rc=1 $(stray "\$'changelog.d/fixed/KEN\\n1\\EX\\t'");$(summary 1 0)" \
   "a pattern carrying ESC that matches nothing is a clean pass on one line, the byte scrubbed|fx_hostile_pattern|$(printf 'COMMIT_GUARDS_CHANGELOG_PATHS=no\033match.md')||rc=0 changelog-entries: OK — no tracked file matches COMMIT_GUARDS_CHANGELOG_PATHS (no?match.md)"
+
+echo "=== the usage is answered ==="
+repo help
+assert_eq "--help prints the usage and exits 0" "rc=0 usage: changelog-entries [--collate]" "$(run "" --help | cut -d';' -f1)"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
