@@ -67,9 +67,12 @@ fx_copy_clean() { copy_method copy-clean; stage a.txt 'hello\n'; }
 fx_copy_marker() { copy_method copy-marker; stage_marker; }
 # Under --separate-git-dir the directory holding the git directory is not
 # the checkout; a package beside it must not run as this repository's gate.
+# That directory is a checkout root of another repository, so being a root
+# does not save it: only owning the git directory does.
 fx_separate() {
   local out="$TMP/separate"
   mkdir -p "$out"
+  git -C "$out" init -q
   git init -q --separate-git-dir "$out/elsewhere.git" "$out/checkout"
   R="$out/checkout"
   identity "$R"
@@ -112,6 +115,21 @@ fx_symlinked() { # the checkout reached through a symlink, the baked path blanke
   W="$TMP/via-link"
 }
 fx_no_package() { armed no-package; stage a.txt 'hello\n'; blank_baked; rm -rf -- "${R:?}/.agents/skills/commit-guards"; }
+# A copy installed outside every skill root finds its siblings beside
+# itself: neither the committing tree nor a project root carries them.
+fx_vendored() {
+  R="$TMP/vendored"
+  mkdir -p "$R/vendor"
+  git -C "$R" init -q
+  identity "$R"
+  cp -R "$GG_SKILL_TEMPLATE" "$R/vendor/commit-guards"
+  ln -s "$SKILL_DIR/../doc-limits" "$R/vendor/doc-limits"
+  "$R/vendor/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true
+  printf 'vendor/\n' >"$R/.gitignore"
+  settings 'DOC_LIMITS_CLASSES = "*.md=1k"'
+  stage big.md "$(head -c 1025 /dev/zero | tr '\0' x)"
+}
+VENDOR_SCRIPTS="<repo>/vendor/commit-guards/scripts"
 CLAUDE_SCRIPTS="<repo>/.claude/skills/commit-guards/scripts"
 run_rows \
   "a package moved under .claude/skills is rediscovered and its chain runs the commit|fx_copy_clean|$ONE|commit|feat: add a|rc=0 $(lanes '<repo>' "$CLAUDE_SCRIPTS");$CHAIN_OK;$MSG_OK feat: add a|" \
@@ -120,7 +138,8 @@ run_rows \
   "a package under the git directory's parent inside the work tree is not the main checkout's|fx_inside|$ONE|commit|feat: inside|rc=1 $BLOCKS|" \
   "a linked worktree is served by the main checkout's package|fx_linked|$ONE|commit|feat: linked|rc=1 $(lanes '<root>/wt-linked and <repo>' "$SCRIPTS");$BLOCKED|" \
   "a checkout reached through a symlink is still gated, through its own root|fx_symlinked|$ONE|commit-here|feat: via link|rc=1 $BLOCKS|" \
-  "with the package gone the search fails closed and names every root|fx_no_package|$ONE|commit|feat: add a|rc=1 kendex-guards: no executable commit-guards pre-commit script at , nor under <repo> or <repo> (project '', roots $ROOTS)|"
+  "with the package gone the search fails closed and names every root|fx_no_package|$ONE|commit|feat: add a|rc=1 kendex-guards: no executable commit-guards pre-commit script at , nor under <repo> or <repo> (project '', roots $ROOTS)|" \
+  "a copy outside every skill root finds doc-limits beside itself, and it gates|fx_vendored|$ONE|commit|feat: add big|rc=1 $(lanes '<repo>' "$VENDOR_SCRIPTS");$BLOCKED|"
 
 echo "=== a consumer's hook is given back byte for byte ==="
 over() { R="$(new_repo "$1")"; printf '%b' "$2" >"$R/.git/hooks/pre-commit"; chmod "${3:-0755}" "$R/.git/hooks/pre-commit"; } # NAME BODY [MODE]
@@ -153,12 +172,21 @@ fx_pf_first() { with_preflight pf-first; stage ok.txt 'hello\n'; }
 fx_pf_blocks() { seeded_preflight pf-blocks; stage loose.sh '#!/usr/bin/env bash\necho hi\n'; }
 fx_pf_clean() { seeded_preflight pf-clean; stage ok.txt 'hello\n'; }
 fx_pf_dangling() { seeded_preflight pf-dangling; stage d.txt 'more\n'; rm "$R/.agents/skills/preflight"; ln -s "$TMP/no-such-skill" "$R/.agents/skills/preflight"; }
+fx_pf_dies() {
+  seeded_preflight pf-dies
+  stage d.txt 'more\n'
+  rm "$R/.agents/skills/preflight"
+  mkdir -p "$R/.agents/skills/preflight/scripts"
+  printf '#!/bin/sh\necho "preflight: cannot source lib/findings.sh" >&2\nexit 2\n' >"$R/.agents/skills/preflight/scripts/preflight"
+  chmod +x "$R/.agents/skills/preflight/scripts/preflight"
+}
 PF_LANES_TAIL="$(skip bot-instructions '<repo>' "$SCRIPTS");$BATCH;$LOCAL_NONE"
 run_rows \
   "the first commit states the preflight skip instead of blocking|fx_pf_first|$ONE|commit|feat: add ok|rc=0 $DL;$PF_FIRST;$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
   "a staged fail-open script blocks through preflight|fx_pf_blocks|$ONE|commit|feat: add loose|rc=1 $DL;$PF_RAN;$PF_LANES_TAIL;$BLOCKED|" \
   "control: clean staged content commits through a run preflight|fx_pf_clean|$ONE|commit|feat: add ok|rc=0 $DL;$PF_RAN;$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
-  "a dangling preflight install blocks, never skips|fx_pf_dangling|$ONE|commit|feat: add d|rc=1 $DL;::error::pre-commit: the preflight skill is installed at <repo>/.agents/skills/preflight but <repo>/.agents/skills/preflight/scripts/preflight is missing or not executable — reinstall it|"
+  "a dangling preflight install blocks, never skips|fx_pf_dangling|$ONE|commit|feat: add d|rc=1 $DL;::error::pre-commit: the preflight skill is installed at <repo>/.agents/skills/preflight but <repo>/.agents/skills/preflight/scripts/preflight is missing or not executable — reinstall it|" \
+  "a preflight that dies at run time is a step that did not complete, and blocks|fx_pf_dies|$ONE|commit|feat: add d|rc=1 $DL;$PF_RAN;pre-commit: step 'preflight' did not complete (exit 2);$PF_LANES_TAIL;$ERRORS|"
 
 echo "=== a repo-local doc-limits replacement is a stated skip only when its parser rejects --staged ==="
 # new_repo links doc-limits to the real skill; a fork fixture replaces the
@@ -172,7 +200,7 @@ fork() { # NAME BODY — a consumer's own doc-limits in place of the skill
   stage ok.txt 'hello\n'
 }
 REJECTS='#!/usr/bin/env bash\ncase "${1:-}" in\n  --staged) echo "::error::doc-limits: unknown argument '"'"'--staged'"'"' (see --help)" >&2; exit 2 ;;\nesac\nexit 0\n'
-ECHOED='#!/usr/bin/env bash\necho "::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit, got '"'"'unknown argument '"'"'--staged'"'"''"'"'" >&2\nexit 2\n'
+ECHOED='#!/usr/bin/env bash\necho "::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit; a run would say doc-limits: unknown argument '"'"'--staged'"'"' (see --help)" >&2\nexit 2\n'
 VERDICT='#!/usr/bin/env bash\necho "doc-limits: FAIL ok.txt over its ceiling"\nexit 1\n'
 fx_fork_rejects() { fork fork-rejects "$REJECTS"; }
 fx_fork_echoed() { fork fork-echoed "$ECHOED"; }
@@ -180,7 +208,7 @@ fx_fork_verdict() { fork fork-verdict "$VERDICT"; }
 FORK_SKIP="=== pre-commit: doc-limits at <repo>/.agents/skills/doc-limits/scripts/doc-limits rejects --staged (repo-local replacement) — skipped; this repo's own wiring owns that gate"
 run_rows \
   "a fork whose parser rejects --staged is skipped and the commit proceeds|fx_fork_rejects|$ONE|commit|feat: add ok|rc=0 $DL;::error::doc-limits: unknown argument '--staged' (see --help);$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
-  "must-fail: the rejection phrase echoed inside a config diagnostic is not a rejection, and the step did not complete|fx_fork_echoed|$ONE|commit|feat: add ok|rc=1 $DL;::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit, got 'unknown argument '--staged'';pre-commit: step 'doc-limits' did not complete (exit 2);$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$ERRORS|" \
+  "must-fail: the whole rejection phrase inside a config diagnostic is not a rejection, and the step did not complete|fx_fork_echoed|$ONE|commit|feat: add ok|rc=1 $DL;::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit; a run would say doc-limits: unknown argument '--staged' (see --help);pre-commit: step 'doc-limits' did not complete (exit 2);$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$ERRORS|" \
   "a fork's own verdict blocks like the skill's|fx_fork_verdict|$ONE|commit|feat: add ok|rc=1 $DL;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$BLOCKED|"
 
 echo "=== a project name survives every byte it may hold ==="
