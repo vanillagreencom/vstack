@@ -21,7 +21,7 @@ deterministically (kendex#454). Auto-retries transient infrastructure
 failures (max 1 retry).
 
   <PR#>          pull request number (required)
-  poll_interval  seconds between polls (default 15)
+  poll_interval  seconds between polls (default 180; do not go lower, the GitHub API budget is shared by every lane)
   max_wait       total budget in seconds (default 600)
   --json         emit the machine-readable result object on stdout
 
@@ -64,7 +64,8 @@ JSON output (always when --json):
 Environment:
   CI_WAIT_NO_CHECKS_GRACE
                 seconds to keep polling before failing when no checks have
-                registered yet (default 180). ci-wait runs after the
+                registered yet (default 600, four polls at the default
+                interval). ci-wait runs after the
                 submit-pr approval gate; approval-gated repos dispatch CI
                 from the pull_request_review event, so check registration
                 can lag. Within the grace window the result stays verdict
@@ -116,7 +117,7 @@ if [ "${#POSITIONAL[@]}" -lt 1 ]; then
 fi
 
 PR_NUM="${POSITIONAL[0]}"
-POLL_INTERVAL="${POSITIONAL[1]:-15}"
+POLL_INTERVAL="${POSITIONAL[1]:-180}"
 MAX_WAIT="${POSITIONAL[2]:-600}"
 
 if ! [[ "$PR_NUM" =~ ^[0-9]+$ ]] || [ "$PR_NUM" -lt 1 ]; then
@@ -317,9 +318,9 @@ no_checks_count=0
 # checks can take minutes to register after the approval gate clears. Within
 # the window the loop keeps polling (verdict stays "pending"); past it, the
 # explicit no-checks diagnostic below fires.
-NO_CHECKS_GRACE="${CI_WAIT_NO_CHECKS_GRACE:-180}"
+NO_CHECKS_GRACE="${CI_WAIT_NO_CHECKS_GRACE:-600}"
 if ! [[ "$NO_CHECKS_GRACE" =~ ^[0-9]+$ ]]; then
-  NO_CHECKS_GRACE=180
+  NO_CHECKS_GRACE=600
 fi
 max_no_checks=$(((NO_CHECKS_GRACE + POLL_INTERVAL - 1) / POLL_INTERVAL))
 if [ "$max_no_checks" -lt 1 ]; then

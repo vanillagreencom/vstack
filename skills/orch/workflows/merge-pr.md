@@ -99,7 +99,7 @@ env -u GH_REPO -u GITHUB_REPOSITORY gh pr view [PR_NUMBER] --json headRefName --
 | Prefix | Wait |
 |--------|------|
 | `unknown:` (GitHub still computing mergeable status) | `github.sh await-mergeable [PR_NUMBER]`, then re-check. Exit 124 on timeout → `auto-recommended` records `merge-readiness-unresolved`; `ask` surfaces the timeout |
-| `ci_pending:` | `.agents/skills/orch/scripts/ci-wait [PR_NUMBER] 15 600`, then re-check. On a non-zero exit or timeout, re-check once for fresh state; if still pending, `auto-recommended` records `merge-ci-pending`, while `ask` surfaces the result. Never another automatic wait |
+| `ci_pending:` | `.agents/skills/orch/scripts/ci-wait [PR_NUMBER] 180 600`, then re-check. On a non-zero exit or timeout, re-check once for fresh state; if still pending, `auto-recommended` records `merge-ci-pending`, while `ask` surfaces the result. Never another automatic wait |
 | `ci_fetch_failed:`, `ci_unconfigured:` | Re-check, at most three checks total, then continue with the latest `CHECK` |
 
 ### 3.2 Act On The Result
@@ -227,7 +227,7 @@ Use the output as `MAIN_REPO_ROOT`.
    Exit `75` means queued or armed. Wait it out here, blocking, and route the verdict it prints. The lane does not hand back and come look later: a lane sitting at its prompt has no next boundary, so a verdict published behind it waits for a human. No lane detaches this wait.
 
    ```bash
-   env -u GH_REPO -u GITHUB_REPOSITORY [MAIN_REPO_ROOT]/.agents/skills/orch/scripts/queue-wait [PR_NUMBER] 30 540 --json
+   env -u GH_REPO -u GITHUB_REPOSITORY [MAIN_REPO_ROOT]/.agents/skills/orch/scripts/queue-wait [PR_NUMBER] 180 540 --json
    ```
 
    The budget is spelled out because `queue-wait`'s own default (its `--help` § Usage) is longer than any agent harness holds a foreground call open. Size it under the harness's shell-tool ceiling and above `QUEUE_WAIT_ARM_GRACE` (`--help` § Environment), so a slow enqueue is not read as `not_queued` — the way `ci-wait` and `approval-wait` are sized where § 3.1 and the Recovery cycle call them. Never leave the default in place here.

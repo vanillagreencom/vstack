@@ -59,10 +59,10 @@ Findings are a JSON artifact per [`schemas/review-finding.md`](./schemas/review-
 .agents/skills/orch/scripts/review-artifact-check --path [WORKTREE_PATH] [AGENT]
 ```
 
-**Self-validate before returning.** Fix until this prints `"ok": true`:
+**Self-validate before returning**, on the file you wrote, never the zero-epoch glob form, which falls through to an older sibling. Fix until this prints `"ok": true`:
 
 ```bash
-.agents/skills/orch/scripts/review-artifact-check [WORKTREE_PATH] [AGENT] 0
+.agents/skills/orch/scripts/review-artifact-check --file [ARTIFACT_PATH]
 ```
 
 Write a control's files under a `mktemp -d` of your own, the way [`scripts/mutation-stability`](./scripts/mutation-stability) does: stubs, fixtures, mutants, logs. The scratchpad root is shared with the parallel panel, where a sibling overwrites a fixed name mid-review.
