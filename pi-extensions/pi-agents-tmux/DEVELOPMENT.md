@@ -40,4 +40,6 @@ For maintainers. What the package does for a consumer is [README.md](README.md);
 bun test ./tests ./extensions/subagent/__tests__
 ```
 
+The suite needs the `tmux` binary: `tests/preload.ts` drops the launching shell's `TMUX` and `TMUX_PANE`, starts a tmux server of its own for the run and points both variables at it, so no case and no spawned child reaches the server the suite was launched from; `tests/own-tmux-server.test.ts` holds it.
+
 `tests/settings-manifest.test.ts` holds the settings defaults in `package.json` to the runtime defaults the code applies. A behaviour that depends on process orderings (timeouts, settled shutdown, lock contention) gets a test that drives the orderings explicitly rather than a sleep.

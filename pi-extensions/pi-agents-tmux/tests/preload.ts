@@ -1,4 +1,5 @@
 import { afterAll, mock } from "bun:test";
+import * as childProcess from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +40,59 @@ afterAll(async () => {
 		rmSync(RUN_TMP_ROOT, { force: true, recursive: true });
 	}
 });
+
+// The suite's own tmux server. The launching shell's TMUX and TMUX_PANE
+// name the developer's live server and pane, and the extension reaches
+// tmux through them: `tmux` resolves its server from TMUX, and
+// pane.ts::setCurrentTmuxPaneTitle retitles TMUX_PANE. Both are stashed for
+// tests/own-tmux-server.test.ts and dropped before any test module loads,
+// then pointed at a server this run starts and kills, so every real tmux
+// call from this process or a child lands there. The session's command
+// exits once this process is gone, which closes the server after a crash
+// too. A tmux that cannot start is a failed run, never a silent fallback
+// to the launching server.
+const INHERITED_TMUX_SYMBOL = Symbol.for("pi-agents-tmux.tests.inherited-tmux");
+(globalThis as Record<PropertyKey, unknown>)[INHERITED_TMUX_SYMBOL] = { TMUX: process.env.TMUX, TMUX_PANE: process.env.TMUX_PANE };
+delete process.env.TMUX;
+delete process.env.TMUX_PANE;
+const TMUX_SERVER_NAME = `pi-agents-tmux-tests-${process.pid}`;
+const tmuxServer = (args: string[]) => childProcess.spawnSync("tmux", ["-L", TMUX_SERVER_NAME, ...args], { encoding: "utf8", env: process.env });
+const started = tmuxServer(["-f", "/dev/null", "new-session", "-d", "-s", "tests", "sh", "-c", `while kill -0 ${process.pid} 2>/dev/null; do sleep 5; done`]);
+if (started.error || started.status !== 0) {
+	throw new Error(`pi-agents-tmux tests need a tmux server of their own and could not start one: ${started.error ?? started.stderr.trim()}`);
+}
+const world = tmuxServer(["display-message", "-p", "#{socket_path},#{pid},#{session_id}\t#{pane_id}"]).stdout.trim();
+const [tmuxEnv, tmuxPane] = world.split("\t");
+if (!tmuxEnv || !tmuxPane) throw new Error(`pi-agents-tmux tests could not read their tmux server back: ${JSON.stringify(world)}`);
+process.env.TMUX = tmuxEnv.replace(",$", ",");
+process.env.TMUX_PANE = tmuxPane;
+
+afterAll(() => {
+	// tmux leaves the socket file behind when the server exits.
+	tmuxServer(["kill-server"]);
+	rmSync(tmuxEnv.split(",")[0]!, { force: true });
+});
+
+// Bun's spawnSync and execFileSync hand a child the environment this
+// process STARTED with unless `env` is given, so the deletion above would
+// not reach them; spawn reads the live process.env. The fixture git calls
+// (single-agent-fixture.ts, needs-completion-fixture.ts,
+// cwd-snapshot-dirty-status.test.ts) and the launcher runs in
+// pi-invocation.test.ts are the sync producers. A caller's own env wins.
+const realChildProcess = { ...childProcess };
+type SyncOptions = Record<string, unknown> | undefined;
+const withLiveEnv = (options: SyncOptions) => ({ env: process.env, ...(options ?? {}) });
+mock.module("node:child_process", () => ({
+	...realChildProcess,
+	execFileSync: (command: string, args?: string[] | SyncOptions, options?: SyncOptions) =>
+		Array.isArray(args)
+			? realChildProcess.execFileSync(command, args, withLiveEnv(options))
+			: realChildProcess.execFileSync(command, withLiveEnv(args)),
+	spawnSync: (command: string, args?: string[] | SyncOptions, options?: SyncOptions) =>
+		Array.isArray(args)
+			? realChildProcess.spawnSync(command, args, withLiveEnv(options))
+			: realChildProcess.spawnSync(command, withLiveEnv(args)),
+}));
 
 // Minimal typebox surface used by extensions/subagent/tools.ts; typebox is an
 // uninstalled peer dependency in this checkout, mocked like the pi peers below.
