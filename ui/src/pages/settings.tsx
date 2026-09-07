@@ -14,6 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import {
+  COMMIT_OFFER_SETTING_DESCRIPTION,
+  COMMIT_OFFER_SETTING_LABEL,
+  GIT_PROJECTS_SECTION,
+} from "@/lib/copy-commit-offer";
 import { SETTINGS_SUBTITLE } from "@/lib/labels";
 import { CONTENT_WIDTH, PAGE_BODY } from "@/lib/layout";
 import { cn } from "@/lib/utils";
@@ -28,7 +34,8 @@ const THEME_LABELS: Record<Appearance, string> = {
 };
 
 export function SettingsPage() {
-  const { settings, onScreen, setAppearance } = useSettingsStore();
+  const { settings, onScreen, setAppearance, setCommitOffer } =
+    useSettingsStore();
   // Null until the read answers; after that the read's own answer, so a
   // version the app could not ask for says so instead of sitting on the
   // ellipsis a still-loading read wears.
@@ -103,6 +110,20 @@ export function SettingsPage() {
                   <PlusIcon />
                 </Button>
               </div>
+            </SettingRow>
+          </Section>
+
+          <Section title={GIT_PROJECTS_SECTION}>
+            <SettingRow
+              label={COMMIT_OFFER_SETTING_LABEL}
+              description={COMMIT_OFFER_SETTING_DESCRIPTION}
+            >
+              <Switch
+                checked={(settings?.["commit-offer"] ?? "ask") === "ask"}
+                onCheckedChange={(on) =>
+                  void setCommitOffer(on ? "ask" : "off")
+                }
+              />
             </SettingRow>
           </Section>
 

@@ -7,7 +7,12 @@ import { ProjectCard } from "./project-card";
 // same way before it is looked for.
 const esc = (copy: string) => copy.replace(/'/g, "&#x27;");
 
-const render = (over: { unmanaged?: number | null } = {}) =>
+const render = (
+  over: {
+    unmanaged?: number | null;
+    badge?: { text: string; variant: "destructive" | "info"; title?: string };
+  } = {},
+) =>
   renderToStaticMarkup(
     <ProjectCard
       name="acme"
@@ -57,5 +62,31 @@ describe("a place's card", () => {
     expect(before.lastIndexOf("<span")).toBeGreaterThan(
       before.lastIndexOf("<button"),
     );
+  });
+
+  // Files kendex wrote and could not offer to commit are not a fault, so
+  // the badge carries its own variant, and the reason rides on hover.
+  it("flags uncommitted files quietly, with the reason on hover", () => {
+    const html = render({
+      badge: {
+        text: "12 uncommitted",
+        variant: "info",
+        title:
+          "12 files kendex wrote are not committed. This checkout is on no branch.",
+      },
+    });
+    expect(html).toContain("12 uncommitted");
+    expect(html).toContain(
+      'title="12 files kendex wrote are not committed. This checkout is on no branch."',
+    );
+    expect(html).not.toContain("bg-destructive");
+  });
+
+  it("still flags a missing folder as a fault", () => {
+    const html = render({
+      badge: { text: "Folder not found", variant: "destructive" },
+    });
+    expect(html).toContain("Folder not found");
+    expect(html).toContain("bg-destructive");
   });
 });

@@ -3,6 +3,7 @@ import {
   type Appearance,
   type AppSettings,
   type CapabilityRow,
+  type CommitOffer,
   commands,
   type SettingsRead,
   ZOOM,
@@ -23,6 +24,7 @@ interface SettingsState extends ZoomSlice, ProjectsSlice {
   capabilities: CapabilityRow[];
   load: () => Promise<void>;
   setAppearance: (appearance: Appearance) => Promise<void>;
+  setCommitOffer: (commitOffer: CommitOffer) => Promise<void>;
   setHarnessRoot: (harness: string, root: string) => Promise<void>;
 }
 
@@ -181,6 +183,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
             {
               label: "Retry",
               onClick: () => void get().setAppearance(appearance),
+            },
+          ],
+        });
+    },
+
+    // Whether kendex asks is machine-local and takes effect on the next
+    // write; nothing on screen changes with it, so only a failure speaks.
+    setCommitOffer: async (commitOffer) => {
+      const result = await write((current) => ({
+        ...current,
+        "commit-offer": commitOffer,
+      }));
+      if (!result.ok)
+        useProblemsStore.getState().showError({
+          title: "Couldn't change the commit offer",
+          message: result.message,
+          steps: ["Try again"],
+          actions: [
+            {
+              label: "Retry",
+              onClick: () => void get().setCommitOffer(commitOffer),
             },
           ],
         });

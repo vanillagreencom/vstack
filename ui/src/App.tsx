@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Toaster } from "sonner";
 import { commands } from "@/bindings";
+import { CommitOfferDialog } from "@/components/commit-offer-dialog";
 import { ErrorDialog } from "@/components/error-dialog";
 import { RepoEffectsDialog } from "@/components/marketplaces/repo-effects-dialog";
 import { NavBar } from "@/components/nav-bar";
@@ -201,6 +202,9 @@ export default function App() {
         />
         <ErrorDialog />
         <RepoEffectsDialog />
+        {/* The question a write leaves behind: what to do with the files
+            kendex wrote in a git project. */}
+        <CommitOfferDialog />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <main className="relative flex flex-1 flex-col overflow-hidden">

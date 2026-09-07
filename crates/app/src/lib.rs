@@ -3,6 +3,7 @@ mod app_settings;
 mod app_update;
 pub mod audit;
 mod commands;
+pub mod commit_offer;
 mod community;
 pub mod deep_link;
 mod editor;
@@ -92,6 +93,10 @@ const TYPED_ERROR_IMPL: &str = r#"async function typedError<T, E>(result: Promis
     }
 }"#;
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the registration list, one line per command the window can call; a split would hide half the surface from the reader who comes here to see it whole"
+)]
 pub fn specta_builder() -> Builder<tauri::Wry> {
     let builder = constants(Builder::<tauri::Wry>::new()).commands(collect_commands![
         commands::app_version,
@@ -141,6 +146,14 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
         marketplaces::install::marketplace_install,
         marketplaces::install::install_targets,
         repo_effects::repo_effects_apply,
+        commit_offer::commit_offer_scan,
+        commit_offer::commit_offer_commit,
+        commit_offer::commit_offer_push,
+        commit_offer::commit_offer_push_head,
+        commit_offer::commit_offer_start_branch,
+        commit_offer::commit_offer_abandon_branch,
+        commit_offer::commit_offer_previous_head,
+        commit_offer::commit_offer_open_pull_request,
         marketplaces::marketplace_subscribe,
         unsubscribe::marketplace_unsubscribe_preview,
         unsubscribe::marketplace_unsubscribe,

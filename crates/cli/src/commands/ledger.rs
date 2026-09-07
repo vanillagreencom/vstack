@@ -87,6 +87,10 @@ fn ledger(
     let flagged = flagged(scored);
     let mut parts = vec![wrote(said.verb, said.count, skipped)];
     let mut steps: Vec<String> = Vec::new();
+    // What this run's commit offer did in this project, read back off the
+    // run's own record rather than passed down by each verb: the part has
+    // to name what actually ran, and only the offer knows that.
+    parts.extend(super::commit_offer::answered(scope).part());
     if skipped > 0 {
         parts.push(format!(
             "skipped {skipped} item{} on conflict",

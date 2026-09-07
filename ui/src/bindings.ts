@@ -324,6 +324,30 @@ export const commands = {
 	installTargets: (scope: Scope, kinds: ItemKind[]) => typedError<InstallTarget[], string>(__TAURI_INVOKE("install_targets", { scope, kinds })),
 	repoEffectsApply: (scope: Scope, declared: DeclaredEffects) => typedError<Said, string>(__TAURI_INVOKE("repo_effects_apply", { scope, declared })),
 	/**
+	 *  Read every project the write could reach, and say for each one whether
+	 *  there is an offer to make, a state to flag on its card, or nothing.
+	 */
+	commitOfferScan: (roots: string[]) => typedError<CommitOfferScan, string>(__TAURI_INVOKE("commit_offer_scan", { roots })),
+	commitOfferCommit: (root: string, message: string) => typedError<CommitStep, string>(__TAURI_INVOKE("commit_offer_commit", { root, message })),
+	commitOfferPush: (root: string, remote: string, branch: string, tracked: boolean) => typedError<StepResult, string>(__TAURI_INVOKE("commit_offer_push", { root, remote, branch, tracked })),
+	/**
+	 *  Push a commit that already exists to a branch of its own, without
+	 *  moving the branch it is on — the recovery a refused push offers.
+	 */
+	commitOfferPushHead: (root: string, remote: string, branch: string) => typedError<StepResult, string>(__TAURI_INVOKE("commit_offer_push_head", { root, remote, branch })),
+	commitOfferStartBranch: (root: string, branch: string) => typedError<StepResult, string>(__TAURI_INVOKE("commit_offer_start_branch", { root, branch })),
+	/**
+	 *  Put the checkout back and remove the empty branch kendex made, after a
+	 *  commit on it refused.
+	 */
+	commitOfferAbandonBranch: (root: string, branch: string) => typedError<StepResult, string>(__TAURI_INVOKE("commit_offer_abandon_branch", { root, branch })),
+	/**
+	 *  The commit a recovery would put the branch back to, read before the
+	 *  commit runs. `null` in a repository with no commit yet.
+	 */
+	commitOfferPreviousHead: (root: string) => typedError<string | null, string>(__TAURI_INVOKE("commit_offer_previous_head", { root })),
+	commitOfferOpenPullRequest: (repo: string, head: string, base: string, title: string, files: number) => typedError<OpenResult, string>(__TAURI_INVOKE("commit_offer_open_pull_request", { repo, head, base, title, files })),
+	/**
 	 *  Subscribe a scope to a marketplace: `owner/repo[@rev]`, a git URL, a
 	 *  GitHub tree URL, a skills.sh package URL, or a local folder.
 	 */
@@ -627,6 +651,12 @@ export type AppSettings = {
 	 *  here. [`crate::legal`] owns the rule.
 	 */
 	terms?: TermsAcceptance | null,
+	/**
+	 *  Whether kendex asks what to do with the files it wrote in a git
+	 *  project. Machine-local like the rest of this file: whether a person
+	 *  is asked is theirs, not their project's, and both shells read it.
+	 */
+	"commit-offer"?: CommitOffer,
 };
 
 export type AppUpdateStatus = { kind: "neverChecked" } | { kind: "upToDate"; version: string } | { kind: "updateAvailable"; version: string; releaseNotesUrl: string; cliAssetAvailable: boolean; muted: boolean } | { kind: "feedOlder"; version: string };
@@ -1046,6 +1076,32 @@ export type CommandNotice =
  *  nothing here to hand a person to run.
  */
 { kind: "needsDownload"; path: string; page: string };
+
+/**
+ *  What a kendex write in a git project does about the files it left
+ *  behind.
+ * 
+ *  There is no value that commits without asking, because the offer's
+ *  contract has none: kendex commits, pushes or opens a pull request only
+ *  after a person chose that in this run.
+ */
+export type CommitOffer = "ask" | "off";
+
+/**  What one read of every project the write could reach found. */
+export type CommitOfferScan = {
+	offers: ProjectOffer[],
+	flagged: ProjectFlag[],
+};
+
+/**  What the commit did. */
+export type CommitStep = 
+/**  The re-read set was empty: the files changed since the offer. */
+{ kind: "nothing" } | { kind: "made"; sha: string; files: number } | { kind: "refused"; refused: Refused; 
+/**
+ *  Paths kendex staged and could not then unstage. They are still
+ *  staged, against the rule that the index ends as it began.
+ */
+stillStaged: number | null };
 
 /**
  *  A package whose presence changes what this one does, and whether it is
@@ -1492,6 +1548,15 @@ export type Finding = {
 	message: string,
 	remediation: string,
 };
+
+export type FlagReason = { kind: "noBranch" } | 
+/**  The operation as a line names it: `a rebase`. */
+{ kind: "inProgress"; operation: string } | 
+/**
+ *  A read the offer is built from would not run, so nothing about this
+ *  project can be claimed.
+ */
+{ kind: "unreadable"; said: string[] };
 
 /**
  *  Why installing beside did not finish, by phase: a refusal wrote
@@ -2356,6 +2421,9 @@ export type OpSupport = {
 	global: boolean,
 };
 
+/**  What opening the pull request did. */
+export type OpenResult = { kind: "opened"; url: string } | { kind: "refused"; refused: Refused };
+
 /**  Where one installation came from. */
 export type Origin = 
 /**
@@ -2717,6 +2785,50 @@ export type PreflightCheck = {
 	fix: string | null,
 };
 
+/**
+ *  A project where kendex owns changed files and the offer cannot be made.
+ *  The window flags it on the project's card rather than opening a dialog
+ *  that offers nothing.
+ */
+export type ProjectFlag = {
+	root: string,
+	count: number,
+	reason: FlagReason,
+};
+
+/**  One project's offer, everything the dialog draws it from. */
+export type ProjectOffer = {
+	root: string,
+	/**  The project's folder name, which the title names. */
+	name: string,
+	/**
+	 *  The files kendex owns whole that changed, printed whole: an
+	 *  abbreviation guesses at a directory and names a different file from
+	 *  the one being committed.
+	 */
+	files: string[],
+	/**  The shared configuration files kendex writes one key in. */
+	shared: string[],
+	/**  How many of the person's own files changed. */
+	others: number,
+	branch: string,
+	remote: string | null,
+	/**  `null` where the choice stands; the reason otherwise. */
+	push: Why | null,
+	pullRequest: Why | null,
+	/**  The pull request already open for this branch. */
+	openNumber: number | null,
+	message: string,
+	newBranch: string,
+	/**  The repository every `gh` call is bound to, from the chosen remote. */
+	repo: string | null,
+	/**
+	 *  The branch already tracks the chosen remote, so a push needs no
+	 *  `--set-upstream`.
+	 */
+	tracked: boolean,
+};
+
 /**  One installation's origin, keyed the way the Library table joins it. */
 export type ProvenanceRow = {
 	scope: Scope,
@@ -2736,6 +2848,22 @@ export type QualityScore = {
 	 *  replace it.
 	 */
 	penaltyPercent: number,
+};
+
+/**  A step that did not go through. */
+export type Refused = {
+	/**  The step, as its own line names it. */
+	step: string,
+	/**
+	 *  The program's own words, whole, in order. Empty where the step ran
+	 *  out of time and said nothing.
+	 */
+	said: string[],
+	timedOut: boolean,
+	/**  The bound in whole seconds, for the line a timeout draws. */
+	seconds: number,
+	/**  Whether the words are `gh`'s rather than git's. */
+	gh: boolean,
 };
 
 /**  A package's declared effects on the repository it installs into. */
@@ -3092,6 +3220,9 @@ export type StatusFinding = {
 	message: string,
 	fix: string,
 };
+
+/**  What one of the other steps did. */
+export type StepResult = { kind: "done" } | { kind: "refused"; refused: Refused };
 
 /**  One row of GET /api/v1/submissions — what a Mine row polls. */
 export type SubmissionRow = {
@@ -3515,6 +3646,17 @@ export type VersionSel =
 { at: "commit"; commit: string } | 
 /**  What is installed on disk right now. */
 { at: "installed" };
+
+/**
+ *  Why a choice is not on offer, for the labelled row the window draws
+ *  under the segments.
+ */
+export type Why = { kind: "noRemote" } | { kind: "remoteNotDecidable" } | { kind: "ghMissing" } | 
+/**
+ *  gh's own first line, so a case nobody anticipated still names
+ *  itself rather than reading as one kendex knows.
+ */
+{ kind: "ghSaid"; line: string };
 
 /**  An effect that was neither shown nor offered, and why. */
 export type Withheld = {

@@ -9,7 +9,7 @@ import {
 } from "@/lib/copy-updates";
 import { countingWrites } from "@/lib/package-places";
 import { READ_PENDING } from "@/lib/read-state";
-import { rescanEverything } from "@/lib/rescan";
+import { offerToCommit, rescanEverything, trackedProjects } from "@/lib/rescan";
 import { caught, settled } from "@/lib/settled";
 import { saying } from "@/lib/undone";
 import {
@@ -160,6 +160,7 @@ export const useUpdatesStore = create<UpdatesState>((set, get) => {
         // Then the machine, on `rescan.ts`'s rule: asked whatever the apply
         // answered, and inside the busy the write holds.
         await rescanEverything();
+        void offerToCommit(trackedProjects());
       });
     },
 
@@ -212,6 +213,7 @@ export const useUpdatesStore = create<UpdatesState>((set, get) => {
         // plan moved, which is the wrong question for a refresh.
         wrote(rows);
         await rescanEverything();
+        void offerToCommit(trackedProjects());
       });
     },
 

@@ -1,22 +1,67 @@
 import { Trash2 } from "lucide-react";
 import { useState } from "react";
-import type { Scope } from "@/bindings";
+import type { ProjectFlag, Scope } from "@/bindings";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { AddProjectDialog } from "@/components/harnesses/add-project-dialog";
 import { ProjectCard } from "@/components/harnesses/project-card";
 import { ScanFolderDialog } from "@/components/harnesses/scan-folder-dialog";
 import { Button } from "@/components/ui/button";
 import { unmanagedCount } from "@/lib/audit-counts";
+import {
+  NOT_CHECKED_BADGE,
+  notChecked,
+  uncommittedBadge,
+  uncommittedInProgress,
+  uncommittedNoBranch,
+} from "@/lib/copy-commit-offer";
 import { type ItemPlace, installedCountByKind } from "@/lib/derive";
 import { CONTENT_WIDTH, PAGE_BODY } from "@/lib/layout";
 import { sameScope } from "@/lib/scope";
 import { cn } from "@/lib/utils";
 import { useAuditOnMount, useAuditStore } from "@/stores/audit";
+import { useCommitOfferStore } from "@/stores/commit-offer";
 import { useNavStore } from "@/stores/nav";
 import { useScanStore } from "@/stores/scan";
 import { useSettingsStore } from "@/stores/settings";
 
 const GLOBAL: Scope = { scope: "global" };
+
+/** What the card flags beside the project's name. A missing folder is a
+ *  fault and outranks everything; uncommitted files kendex wrote are not a
+ *  fault, and their reason is on hover the way the card already hides a
+ *  status word behind one. */
+function badgeFor(
+  root: string,
+  missing: string[],
+  flagged: ProjectFlag[],
+):
+  | { text: string; variant: "destructive" | "info"; title?: string }
+  | undefined {
+  if (missing.includes(root))
+    return { text: "Folder not found", variant: "destructive" };
+  const flag = flagged.find((each) => each.root === root);
+  if (!flag) return undefined;
+  switch (flag.reason.kind) {
+    case "noBranch":
+      return {
+        text: uncommittedBadge(flag.count),
+        variant: "info",
+        title: uncommittedNoBranch(flag.count),
+      };
+    case "inProgress":
+      return {
+        text: uncommittedBadge(flag.count),
+        variant: "info",
+        title: uncommittedInProgress(flag.count, flag.reason.operation),
+      };
+    case "unreadable":
+      return {
+        text: NOT_CHECKED_BADGE,
+        variant: "info",
+        title: notChecked(flag.reason.said),
+      };
+  }
+}
 
 /** "Projects": personal plus every registered project, one card each. */
 export function ProjectList() {
@@ -44,6 +89,10 @@ export function ProjectList() {
   const [adding, setAdding] = useState(false);
   const [scanning, setScanning] = useState(false);
 
+  // Projects where kendex owns changed files and no offer can be made: a
+  // dialog that offers nothing is a modal a person has to dismiss for no
+  // reason, so the state is flagged on the card instead.
+  const flagged = useCommitOfferStore((s) => s.flagged);
   const items = result?.items ?? [];
   const projects = settings?.projects ?? [];
   // A card counts one place and links to that place. Both read the same
@@ -91,11 +140,7 @@ export function ProjectList() {
                 path={root}
                 counts={[...installedCountByKind(items, place).entries()]}
                 emptyLabel="Nothing from kendex yet."
-                badge={
-                  result?.missingProjects.includes(root)
-                    ? "Folder not found"
-                    : undefined
-                }
+                badge={badgeFor(root, result?.missingProjects ?? [], flagged)}
                 onOpen={() => goToLibrary(place)}
                 onKindClick={(kind) => goToLibrary({ ...place, kind })}
                 unmanaged={notManaged(scope)}

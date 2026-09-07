@@ -13,7 +13,7 @@ import {
   VERSION_ERROR_TITLE,
 } from "@/lib/copy";
 import { UPDATES_ONE_AT_A_TIME_NOTE } from "@/lib/copy-updates";
-import { rescanEverything } from "@/lib/rescan";
+import { offerToCommit, rescanEverything, trackedProjects } from "@/lib/rescan";
 import { settled } from "@/lib/settled";
 import { saying } from "@/lib/undone";
 import { workOut } from "@/lib/updates-read-state";
@@ -43,6 +43,7 @@ export function packageVersionActions(
     // the same call the updates store's own apply makes, on the rule
     // `rescan.ts`'s header states.
     void rescanEverything();
+    void offerToCommit(trackedProjects());
   };
   // Every one of these applies a plan that can refuse a rendering, so
   // none of them toasts off the click: the command's own report says what

@@ -225,6 +225,12 @@ pub struct EngineReport {
     /// The forks this pass found edited on disk. They are not in `drift`:
     /// there is nothing to fix and nothing to decide.
     pub fork_edits: Vec<ForkEdit>,
+    /// The paths this pass renders into the scope, split into the files
+    /// kendex owns whole and the shared configuration files it writes one
+    /// key in. The inventory is written from it, and the commit offer
+    /// covers the whole-file group — one collection, so the two cannot
+    /// name different files.
+    pub generated: super::GeneratedPaths,
 }
 
 /// One name a removal was asked for, with the kind it must be when the

@@ -31,6 +31,9 @@ pub enum MarketplaceCommand {
         /// project | global (default project)
         #[arg(long)]
         scope: Option<String>,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
     },
     /// Unsubscribe from a marketplace, removing or keeping its packages
     Unsubscribe {
@@ -49,6 +52,9 @@ pub enum MarketplaceCommand {
         /// project | global (default project)
         #[arg(long)]
         scope: Option<String>,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
     },
     /// Packages and curated sets a subscription offers
     Browse {
@@ -293,6 +299,7 @@ pub fn run(env: &Env, command: MarketplaceCommand) -> CliResult {
             name,
             global,
             scope,
+            ..
         } => run_subscribe(env, &reference, name.as_deref(), global, scope)?,
         MarketplaceCommand::Unsubscribe {
             name,
@@ -301,6 +308,7 @@ pub fn run(env: &Env, command: MarketplaceCommand) -> CliResult {
             discard_edits,
             global,
             scope,
+            ..
         } => run_unsubscribe(
             env,
             &name,

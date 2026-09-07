@@ -47,6 +47,31 @@ pub struct AppSettings {
     /// here. [`crate::legal`] owns the rule.
     #[serde(default)]
     pub terms: Option<crate::legal::TermsAcceptance>,
+    /// Whether kendex asks what to do with the files it wrote in a git
+    /// project. Machine-local like the rest of this file: whether a person
+    /// is asked is theirs, not their project's, and both shells read it.
+    #[serde(default, rename = "commit-offer")]
+    pub commit_offer: CommitOffer,
+}
+
+/// What a kendex write in a git project does about the files it left
+/// behind.
+///
+/// There is no value that commits without asking, because the offer's
+/// contract has none: kendex commits, pushes or opens a pull request only
+/// after a person chose that in this run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum CommitOffer {
+    #[default]
+    Ask,
+    Off,
+}
+
+impl CommitOffer {
+    pub fn asking(self) -> bool {
+        self == CommitOffer::Ask
+    }
 }
 
 fn default_zoom() -> u16 {
@@ -80,6 +105,7 @@ impl Default for AppSettings {
             muted_app_notice: None,
             zoom: ZOOM.default,
             terms: None,
+            commit_offer: CommitOffer::Ask,
         }
     }
 }

@@ -25,6 +25,9 @@ pub struct ForkArgs {
     /// project | global (default project)
     #[arg(long)]
     scope: Option<String>,
+    /// The commit offer's answer, without asking
+    #[command(flatten)]
+    _commit: crate::commands::commit_offer::CommitFlags,
 }
 
 pub fn run(env: &Env, args: ForkArgs) -> CliResult {

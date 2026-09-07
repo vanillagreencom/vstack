@@ -43,6 +43,7 @@ vi.mock("@/bindings", async (importOriginal) => ({
     scanMachine: vi.fn(),
     auditAll: vi.fn(),
     libraryProvenance: vi.fn(),
+    commitOfferScan: vi.fn(),
   },
 }));
 
@@ -113,6 +114,15 @@ beforeEach(() => {
     status: "ok",
     data: [],
   });
+  // The commit offer rides behind every write here, over the projects
+  // this machine tracks, and answers with nothing to offer.
+  vi.mocked(commands.commitOfferScan).mockResolvedValue({
+    status: "ok",
+    data: { offers: [], flagged: [] },
+  });
+  useSettingsStore.setState({
+    settings: { projects: ["/home/me/tracked"] } as never,
+  });
   useScanStore.setState({
     scanning: false,
     result: null,
@@ -140,6 +150,12 @@ beforeEach(() => {
 const readAgain = () => {
   expect(commands.scanMachine).toHaveBeenCalled();
   expect(commands.auditAll).toHaveBeenCalled();
+  // And the offer was made behind the same write, over the tracked
+  // projects: a write redirected into another project writes under that
+  // project's root, so the scope alone would miss it.
+  expect(commands.commitOfferScan).toHaveBeenCalledWith(
+    useSettingsStore.getState().settings?.projects,
+  );
 };
 
 describe("a write that reaches repo_effects and is refused", () => {

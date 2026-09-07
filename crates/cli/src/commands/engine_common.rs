@@ -130,19 +130,18 @@ pub fn confirm_and_apply(
     report: &EngineReport,
     yes: bool,
 ) -> Result<usize, Box<dyn std::error::Error>> {
-    if report.plan.is_empty() {
-        return Ok(0);
-    }
     // The count is the consequence: an answer given to a bare "apply?" is
-    // an answer to the verb's name rather than to what it writes.
-    let ops = report.plan.ops.len();
-    ask_before_writing(&format!("apply {ops} change{}?", plural(ops)), yes)?;
-    let _writing = ui::spinner("writing");
+    // an answer to the verb's name rather than to what it writes. An empty
+    // plan asks nothing and writes nothing, and still reaches the offer.
+    if !report.plan.is_empty() {
+        let ops = report.plan.ops.len();
+        ask_before_writing(&format!("apply {ops} change{}?", plural(ops)), yes)?;
+    }
     apply_report(env, report)
 }
 
 /// Execute a report's plan — the one way a CLI verb holding an
-/// `EngineReport` writes it.
+/// `EngineReport` writes it, and where the commit offer is made.
 ///
 /// A plan can take a package away whatever the verb — `remove`, a manifest
 /// edited by hand and applied, a sweep, an unsubscribe that drops its
@@ -151,9 +150,30 @@ pub fn confirm_and_apply(
 /// skips that, so no verb does: every report goes through here, and only a
 /// bare `Plan` with no report behind it, which by construction drops no
 /// package, is executed on its own.
+/// The offer rides here rather than in each verb: a write into a project
+/// checkout is exactly what leaves files git can see, and a verb added
+/// later cannot forget to ask. It is made at most once per project per
+/// run, whichever verb reached it first, and `update-pi` — which writes
+/// into a project's `.pi` directory without a plan — calls it itself.
+///
+/// It runs for every project scope the run reached, an empty plan
+/// included: a scope with nothing left to write can still hold the files
+/// an earlier run left uncommitted, and `run again with --commit` has to
+/// mean something. The empty plan itself writes nothing.
 pub fn apply_report(env: &Env, report: &EngineReport) -> Result<usize, Box<dyn std::error::Error>> {
-    super::repo_effects::undo(&report.plan.scope, report)?;
-    Ok(kendex_core::apply::execute(env, &report.plan)?.applied)
+    let applied = match report.plan.is_empty() {
+        true => 0,
+        false => {
+            super::repo_effects::undo(&report.plan.scope, report)?;
+            // The wait covers the write and nothing after it: the offer
+            // asks a question, and a spinner still ticking under it would
+            // draw over the answer.
+            let _writing = ui::spinner("writing");
+            kendex_core::apply::execute(env, &report.plan)?.applied
+        }
+    };
+    super::commit_offer::after_writing(env, &report.plan.scope, &report.generated)?;
+    Ok(applied)
 }
 
 /// The answer every verb needs before it writes, asked one way. `--yes`
