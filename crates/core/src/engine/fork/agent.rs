@@ -47,8 +47,29 @@ pub(super) fn capture_agent(of: &ForkOf, edited: &Path) -> Result<CapturedAgent>
         overrides,
         read_at,
     } = published(of)?;
+    // What this scope's last install recorded. An absent record already
+    // loads as an empty current one, which is the answer for a scope that
+    // has installed nothing yet; a corrupt or too-new one is an error and
+    // is raised, because reconstructing an agent from the manifest default
+    // would rewrite its skill paths on a guess.
+    let installed = crate::lock::load(&crate::lock::lock_path(env, scope))?;
     let around = Around {
-        skills: carry.as_ref().map(AgentCarry::skills).unwrap_or_default(),
+        skills: crate::engine::desired_agent::required_skills(
+            env,
+            scope,
+            harness,
+            manifest,
+            // A fork reads back an installation, so the record of what was
+            // written is the authority: a set's members are in the lock
+            // under their own delivery and in no `[skills.<name>]` table.
+            |skill| {
+                installed
+                    .entries
+                    .get(&crate::lock::entry_key(ItemKind::Skill, skill, harness))
+                    .map(|entry| entry.method)
+            },
+            &carry.as_ref().map(AgentCarry::skills).unwrap_or_default(),
+        ),
         overrides,
         launch: merged_instructions(&manifest.agent_launch_instructions, name),
         additional: merged_instructions(&manifest.agent_additional_instructions, name),
@@ -225,7 +246,7 @@ fn crlf(body: &str) -> bool {
 }
 
 struct Around<'a> {
-    skills: Vec<String>,
+    skills: Vec<crate::render::agent::RequiredSkill>,
     overrides: FrontmatterOverrides,
     launch: Option<String>,
     additional: Option<String>,

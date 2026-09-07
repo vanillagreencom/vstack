@@ -1,12 +1,13 @@
+use crate::env::Env;
 use crate::error::Result;
 use crate::hash::installation_hash;
 use crate::lock::entry_key;
 use crate::manifest::{CustomHook, FrontmatterOverrides, HookAgents, Manifest, Method};
 use crate::mapping::EffectiveSkills;
-use crate::model::{HarnessId, ItemKind};
+use crate::model::{HarnessId, ItemKind, Scope};
 use crate::render::agent::{
-    EffectiveAgent, RenderedAgent, Selects, SourceAgent, file_name, generate, hooks_for_agent,
-    merge_overrides, merged_instructions, parse_source_agent, selects,
+    EffectiveAgent, RenderedAgent, RequiredSkill, Selects, SourceAgent, file_name, generate,
+    hooks_for_agent, merge_overrides, merged_instructions, parse_source_agent, selects,
 };
 use crate::render::validate::validate_agent;
 
@@ -353,6 +354,42 @@ fn gathered<'a>(
     }
 }
 
+/// Each required skill with the place its own delivery wrote it.
+///
+/// `delivered` is the caller's authority on how a skill was delivered, and
+/// the manifest is only the fallback: a skill can reach a scope without a
+/// declaration of its own — a set's members carry the set's method
+/// (`bundles::member_decl`) and appear in no `[skills.<name>]` table — so
+/// asking the manifest first would answer with the scope default and send
+/// an agent to a tree the set never wrote. Resolved here because this is
+/// where the `Env` a relocated harness root needs is.
+pub(crate) fn required_skills(
+    env: &Env,
+    scope: &Scope,
+    harness: HarnessId,
+    manifest: &Manifest,
+    delivered: impl Fn(&str) -> Option<crate::manifest::Method>,
+    names: &[String],
+) -> Vec<RequiredSkill> {
+    names
+        .iter()
+        .map(|name| {
+            let method = delivered(name).unwrap_or_else(|| {
+                manifest
+                    .skills
+                    .get(name)
+                    .map_or(manifest.install.method, |decl| {
+                        super::desired::effective_method(decl, manifest)
+                    })
+            });
+            RequiredSkill {
+                name: name.clone(),
+                root: crate::render::agent::skill_root(env, harness, scope, method),
+            }
+        })
+        .collect()
+}
+
 /// One agent's effective intent for one harness: what the source asks for,
 /// with whatever this project contributes folded in. Pass
 /// `Project::default()` and what comes out is the publisher's own.
@@ -375,7 +412,20 @@ fn effective_agent<'a>(
         source,
         harness,
         scope: ctx.scope,
-        skills: project.skills.unwrap_or_else(|| upstream_skills.to_vec()),
+        skills: required_skills(
+            ctx.env,
+            ctx.scope,
+            harness,
+            ctx.manifest,
+            // The plan being installed is the authority here: it holds a
+            // set member's declaration, which the manifest does not.
+            |skill| {
+                ctx.expansion
+                    .decl_of(ItemKind::Skill, skill)
+                    .map(|decl| super::desired::effective_method(&decl, ctx.manifest))
+            },
+            &project.skills.unwrap_or_else(|| upstream_skills.to_vec()),
+        ),
         overrides,
         permissions,
         launch_instructions: project.launch_instructions,

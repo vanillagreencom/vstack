@@ -217,3 +217,50 @@ fn a_crlf_rendering_forks_with_its_wrapper_off_and_its_endings_kept() {
         assert_eq!(times(&after, section), 1, "{section}: {after}");
     }
 }
+
+/// A fork reads the record of the install to place an agent's required
+/// skills, so a record it cannot read is raised rather than treated as an
+/// empty one. Falling back would rewrite every skill path in the captured
+/// agent from the scope default — a guess, written over the person's file.
+#[test]
+#[allow(clippy::unwrap_used)]
+fn a_fork_refuses_a_lock_it_cannot_read_rather_than_guessing_the_paths() {
+    let w = world();
+    write_skill(&w.upstream, "recon", "Recon.");
+    write_agent(&w.upstream, "rev", "Upstream body.");
+    fs::write(
+        w.upstream.join("kendex.toml"),
+        "[agent-skills]\nrev = [\"recon\"]\n",
+    )
+    .unwrap();
+    commit(&w.upstream, "one");
+
+    let path = manifest::manifest_path(&w.env, &w.scope);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        format!(
+            "schema = 6\n\n[sources.cat]\nrepo = \"{REPO}\"\n\n[install]\nharnesses = [\"gemini\"]\nmethod = \"symlink\"\n\n[agents.rev]\nsource = \"cat\"\n\n[skills.recon]\nsource = \"cat\"\n"
+        ),
+    )
+    .unwrap();
+    sync_and_apply(&w);
+    edit_body(&rendered(&w, HarnessId::Gemini, "rev"));
+
+    // The same fork settles while the record is readable, so what the
+    // corrupt one below changes is the record and nothing else.
+    let lock = lock_path(&w.env, &w.scope);
+    let good = fs::read_to_string(&lock).unwrap();
+    fork::fork(&w.env, &w.scope, ItemKind::Agent, "rev", HarnessId::Gemini).unwrap();
+
+    fs::write(&lock, "{ not json").unwrap();
+    let error = fork::fork(&w.env, &w.scope, ItemKind::Agent, "rev", HarnessId::Gemini)
+        .expect_err("a record this build cannot read is raised");
+    assert!(
+        matches!(error, kendex_core::error::CoreError::LockCorrupt { .. }),
+        "{error}"
+    );
+
+    fs::write(&lock, good).unwrap();
+    fork::fork(&w.env, &w.scope, ItemKind::Agent, "rev", HarnessId::Gemini).unwrap();
+}
