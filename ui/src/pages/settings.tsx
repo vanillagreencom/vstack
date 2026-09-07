@@ -117,8 +117,10 @@ export function SettingsPage() {
             <SettingRow
               label={COMMIT_OFFER_SETTING_LABEL}
               description={COMMIT_OFFER_SETTING_DESCRIPTION}
+              htmlFor="commit-offer"
             >
               <Switch
+                id="commit-offer"
                 checked={(settings?.["commit-offer"] ?? "ask") === "ask"}
                 onCheckedChange={(on) =>
                   void setCommitOffer(on ? "ask" : "off")

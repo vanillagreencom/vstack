@@ -333,6 +333,33 @@ fn a_sweeps_removal_joins_the_set_and_a_surviving_path_does_not() {
     assert_eq!(found.others, 1, "the surviving path was not the person's");
 }
 
+/// A rename's origin is a deletion, so a renamed-away inventory path joins
+/// the set as a sweep's removal. The copy row, which git emits only under
+/// `status.renames=copies`, is proved against its documented bytes in
+/// `paths.rs`.
+#[test]
+fn a_renames_origin_is_a_removal() {
+    let repo = Repo::new(&[(".claude/skills/old/SKILL.md", "old content here\n")]);
+    let generated = repo.generated(&[], &[]);
+    repo.git(&["config", "status.renames", "copies"]);
+    fs::create_dir_all(repo.root.join(".claude/skills/moved")).unwrap();
+    repo.git(&[
+        "mv",
+        ".claude/skills/old/SKILL.md",
+        ".claude/skills/moved/SKILL.md",
+    ]);
+    assert!(repo.status().starts_with("R  "), "{}", repo.status());
+    let renamed = repo.scan(&generated).unwrap();
+    assert_eq!(
+        renamed.owned,
+        [Owned {
+            path: ".claude/skills/old/SKILL.md".to_owned(),
+            untracked: false
+        }]
+    );
+    assert_eq!(renamed.others, 1, "the moved-to path was not the person's");
+}
+
 /// The two states the offer cannot be made in, each read where git keeps
 /// it. The operation outranks the detached `HEAD` it leaves behind.
 #[test]
@@ -413,7 +440,7 @@ fn without_a_remote_the_offer_names_why_push_and_pull_request_are_off() {
     let repo = Repo::new(&[(OWNED[0], "one\n")]);
     let generated = repo.generated(&[OWNED[0]], &[]);
     repo.write(OWNED[0], "two\n");
-    let none = offer(repo.scan(&generated).unwrap(), "refresh").unwrap();
+    let none = offer(repo.scan(&generated).unwrap(), "refresh", Probe::Gh).unwrap();
     assert_eq!(none.push, Err(Unavailable::NoRemote));
     assert_eq!(none.pull_request, Err(Unavailable::NoRemote));
     assert_eq!(none.message, "chore: kendex refresh");
@@ -422,7 +449,7 @@ fn without_a_remote_the_offer_names_why_push_and_pull_request_are_off() {
 
     repo.git(&["remote", "add", "alpha", "https://example.com/a.git"]);
     repo.git(&["remote", "add", "beta", "https://example.com/b.git"]);
-    let several = offer(repo.scan(&generated).unwrap(), "refresh").unwrap();
+    let several = offer(repo.scan(&generated).unwrap(), "refresh", Probe::Gh).unwrap();
     assert_eq!(several.push, Err(Unavailable::RemoteNotDecidable));
     assert_eq!(several.pull_request, Err(Unavailable::RemoteNotDecidable));
 }

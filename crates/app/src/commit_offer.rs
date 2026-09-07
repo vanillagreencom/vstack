@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use kendex_core::commit_offer::{self, Branch, Committed, Failed, Offer, Step, Unavailable};
+use kendex_core::commit_offer::{self, Branch, Committed, Failed, Offer, Probe, Step, Unavailable};
 use kendex_core::env::Env;
 use kendex_core::model::Scope;
 use serde::Serialize;
@@ -224,7 +224,7 @@ fn read(env: &Env, root: &Path) -> Result<Option<Result<ProjectOffer, ProjectFla
     }
     // The window's write is not a typed command, so the message names the
     // shell the person is in rather than a verb they typed.
-    match commit_offer::offer(scan, COMMAND) {
+    match commit_offer::offer(scan, COMMAND, Probe::Gh) {
         Ok(offer) => Ok(Some(Ok(drawn(root, offer)))),
         Err(failed) => Ok(Some(Err(ProjectFlag {
             root: shown(root),

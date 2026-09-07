@@ -15,7 +15,7 @@ use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use kendex_core::commit_offer::{self, Branch, Offer};
+use kendex_core::commit_offer::{self, Branch, Offer, Probe};
 use kendex_core::engine::GeneratedPaths;
 use kendex_core::env::Env;
 use kendex_core::model::Scope;
@@ -244,7 +244,12 @@ pub fn after_writing(env: &Env, scope: &Scope, generated: &GeneratedPaths) -> Cl
         return Ok(());
     }
     let outcome = match make(env, scope, root, generated) {
-        Ok(outcome) => outcome,
+        // Nothing kendex owns had changed by this write: not an answer,
+        // so a later report the same verb applies into this project can
+        // still offer. `drift-hook` writes an empty report before the one
+        // that renders the hook.
+        Ok(None) => return Ok(()),
+        Ok(Some(outcome)) => outcome,
         Err(error) if crate::ui::cancelled(error.as_ref()) => {
             CANCELLED.store(true, std::sync::atomic::Ordering::Relaxed);
             Outcome::Nothing
@@ -261,26 +266,28 @@ pub fn refused() -> bool {
     record_of().values().any(Outcome::refused)
 }
 
+/// `None` where nothing kendex owns had changed, which records nothing;
+/// every other way out is an outcome the run remembers for this project.
 fn make(
     env: &Env,
     scope: &Scope,
     root: &std::path::Path,
     generated: &GeneratedPaths,
-) -> Result<Outcome, Box<dyn std::error::Error>> {
+) -> Result<Option<Outcome>, Box<dyn std::error::Error>> {
     let default = Session {
         flags: CommitFlags::default(),
         command: String::new(),
     };
     let session = SESSION.get().unwrap_or(&default);
     let scan = match commit_offer::scan(scope, generated) {
-        Ok(None) => return Ok(Outcome::Nothing),
+        Ok(None) => return Ok(None),
         Ok(Some(scan)) => scan,
         // A read the offer is built from that would not run leaves the
         // offer unbuildable. The verb's own writes still stand, so this is
         // one line rather than a failure of the run.
         Err(failed) => {
             block::unreadable(root, &failed);
-            return Ok(Outcome::Nothing);
+            return Ok(Some(Outcome::Nothing));
         }
     };
     let answered = session.flags.answered();
@@ -289,33 +296,39 @@ fn make(
     match &scan.branch {
         Branch::Detached => {
             block::no_branch(root, scan.count());
-            return Ok(Outcome::Nothing);
+            return Ok(Some(Outcome::Nothing));
         }
         Branch::InProgress(operation) => {
             block::in_progress(root, scan.count(), *operation);
-            return Ok(Outcome::Nothing);
+            return Ok(Some(Outcome::Nothing));
         }
         Branch::On(_) => {}
     }
     if answered == Some(Choice::Leave) {
-        return Ok(Outcome::Nothing);
+        return Ok(Some(Outcome::Nothing));
     }
     if answered.is_none() {
         // The setting turns off the asking, not the choices — which is why
         // it is read here and not before a flag has had its say.
         if !commit_offer::asking(env) {
-            return Ok(Outcome::Nothing);
+            return Ok(Some(Outcome::Nothing));
         }
         if !std::io::stdin().is_terminal() {
             block::no_terminal(root, scan.count());
-            return Ok(Outcome::Nothing);
+            return Ok(Some(Outcome::Nothing));
         }
     }
-    let offer = match commit_offer::offer(scan, &session.command) {
+    // A flag that already chose `commit` or `push` never takes the
+    // pull-request choice, so `gh` is not asked about it.
+    let probe = match answered {
+        Some(Choice::Commit) | Some(Choice::Push) => Probe::Skip,
+        Some(Choice::Pr) | Some(Choice::Leave) | None => Probe::Gh,
+    };
+    let offer = match commit_offer::offer(scan, &session.command, probe) {
         Ok(offer) => offer,
         Err(failed) => {
             block::unreadable(root, &failed);
-            return Ok(Outcome::Nothing);
+            return Ok(Some(Outcome::Nothing));
         }
     };
     match answered {
@@ -325,7 +338,7 @@ fn make(
             // stand. Nothing was committed, which is what the ledger says.
             if let Some(reason) = block::not_on_offer(&offer, choice) {
                 block::flag_refused(&offer, &reason);
-                return Ok(Outcome::CommitRefused);
+                return Ok(Some(Outcome::CommitRefused));
             }
             routes::take(
                 &offer,
@@ -334,8 +347,9 @@ fn make(
                 session.flags.message.clone(),
                 Asking::No,
             )
+            .map(Some)
         }
-        None => ask(&offer, generated, session.flags.message.clone()),
+        None => ask(&offer, generated, session.flags.message.clone()).map(Some),
     }
 }
 

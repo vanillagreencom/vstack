@@ -150,8 +150,9 @@ fn in_progress(root: &Path) -> Result<Option<Operation>, Failed> {
 /// `-z` because a path may hold any byte but NUL, and because it turns off
 /// the quoting git otherwise applies to an unusual name. A rename or copy
 /// row is followed by a second NUL-terminated field naming where the path
-/// came from; that origin is a change of its own and is classified like
-/// any other row.
+/// came from. A rename's origin is gone from the working tree under that
+/// name, which is what a deletion is, and is classified like any other
+/// row; a copy's origin is still there and is no change of its own.
 fn rows(status: &[u8]) -> Vec<Row<'_>> {
     let mut rows = Vec::new();
     let mut fields = status.split(|byte| *byte == 0).filter(|f| !f.is_empty());
@@ -171,13 +172,13 @@ fn rows(status: &[u8]) -> Vec<Row<'_>> {
             let Some(origin) = fields.next() else {
                 break;
             };
-            // Where the path came from: gone from the working tree under
-            // that name, which is what a deletion is.
-            rows.push(Row {
-                x: b'D',
-                y: b' ',
-                path: origin,
-            });
+            if x == b'R' {
+                rows.push(Row {
+                    x: b'D',
+                    y: b' ',
+                    path: origin,
+                });
+            }
         }
     }
     rows
@@ -199,4 +200,32 @@ fn relative<'a>(
         .into_iter()
         .filter_map(|path| path.strip_prefix(root).ok().map(crate::paths::slashed))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rows;
+
+    /// git's `--porcelain=v1 -z` rows as documented: a rename or copy row
+    /// is followed by its origin field. A rename's origin is emitted as a
+    /// deletion; a copy's origin is consumed and is no row of its own.
+    #[test]
+    fn a_renames_origin_is_a_deletion_and_a_copys_is_consumed() {
+        let status = b"R  new.md\0old.md\0C  copy.md\0src.md\0?? loose.md\0";
+        let seen: Vec<(u8, u8, &str)> = rows(status)
+            .iter()
+            .map(|row| (row.x, row.y, std::str::from_utf8(row.path).unwrap()))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                (b'R', b' ', "new.md"),
+                (b'D', b' ', "old.md"),
+                (b'C', b' ', "copy.md"),
+                (b'?', b'?', "loose.md"),
+            ]
+        );
+        assert!(rows(status)[1].deleted());
+        assert!(rows(status)[3].untracked());
+    }
 }

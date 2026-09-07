@@ -128,6 +128,7 @@ fn path_with_fake_gh(home: &Path) -> String {
 }
 
 const FAKE_GH: &str = r#"#!/bin/sh
+echo "$@" >> "$(dirname "$0")/calls"
 repo=""
 prev=""
 for a in "$@"; do
@@ -200,6 +201,10 @@ fn the_commit_flag_commits_the_set_with_the_commands_message() {
     assert!(
         text.contains(" · committed 2 files"),
         "no ledger part: {text}"
+    );
+    assert!(
+        !home.join("fake-bin/calls").exists(),
+        "a commit that takes no pull request asked gh"
     );
     assert_eq!(head_subject(&project), "chore: kendex apply");
     let files = git(&project, &["show", "--name-only", "--format=", "HEAD"]);
@@ -345,6 +350,7 @@ fn the_pull_request_flag_opens_one_or_names_the_branch_gh_refused() {
         text.contains(" · committed 2 files, pull request open"),
         "no ledger part: {text}"
     );
+    assert!(home.join("fake-bin/calls").exists(), "gh was never asked");
     assert_eq!(
         git(&project, &["symbolic-ref", "--short", "HEAD"]).trim(),
         "kendex/renders"
@@ -498,5 +504,27 @@ fn two_answers_at_once_are_refused_before_the_write() {
     assert!(
         !project.join("CLAUDE.md").exists(),
         "the verb wrote before refusing"
+    );
+}
+
+/// A verb that applies more than one report into the project: the first
+/// report has nothing kendex owns changed and records no answer, so the
+/// report that renders the hook still reaches the offer.
+#[test]
+fn a_verbs_later_report_still_reaches_the_offer() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = rooted(&tmp);
+    let project = project(&tmp);
+    let output = kendex(&home, &project, &["drift-hook", "--yes", "--commit"]);
+    let text = said(&output);
+    assert!(output.status.success(), "{text}");
+    assert!(
+        text.contains("committed "),
+        "the hook's render was not offered: {text}"
+    );
+    assert_ne!(
+        head_subject(&project),
+        "files",
+        "nothing was committed: {text}"
     );
 }

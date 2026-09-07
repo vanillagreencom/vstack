@@ -315,13 +315,25 @@ pub struct Offer {
     pub new_branch: String,
 }
 
-/// Build the whole offer from a scan: choose the remote, probe `gh`, and
-/// pick the branch a pull request would use.
+/// Whether building the offer asks `gh` about the repository.
 ///
-/// Only a surface that is going to ask calls this. It costs one network
-/// call — the `gh` probe — and that probe runs only where a remote was
+/// `Skip` leaves the pull-request choice standing unprobed, and only a
+/// caller that will never take that choice may pass it: a flag that
+/// already answered `commit` or `push` needs the remote and nothing from
+/// `gh`, and should not wait on the network or on a sign-in it does not
+/// use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Probe {
+    Gh,
+    Skip,
+}
+
+/// Build the whole offer from a scan: choose the remote, probe `gh` where
+/// [`Probe::Gh`] asks for it, and pick the branch a pull request would use.
+///
+/// The probe is the one network call, and it runs only where a remote was
 /// chosen, so a project with no remote pays nothing for it.
-pub fn offer(scan: Scan, command: &str) -> std::result::Result<Offer, Failed> {
+pub fn offer(scan: Scan, command: &str, probe: Probe) -> std::result::Result<Offer, Failed> {
     let Some(branch) = scan.on_branch().map(str::to_owned) else {
         // Both callers check the branch state before they reach here: the
         // states it names are flagged, never offered.
@@ -337,6 +349,7 @@ pub fn offer(scan: Scan, command: &str) -> std::result::Result<Offer, Failed> {
             };
             (Err(why.clone()), Err(why), None)
         }
+        Some(_) if probe == Probe::Skip => (Ok(()), Ok(()), None),
         Some(remote) => match gh::probe(&remote.url, &branch) {
             Ok(open) => (Ok(()), Ok(()), open),
             Err(why) => (Ok(()), Err(why), None),
