@@ -166,6 +166,9 @@ run() { # ENVS ACTION ARG
   # (a linked worktree, or a second project in the repository), against it.
   case "$2" in *-wt) target="$W" ;; esac
   installer="${INSTALLER_DIR:-$target}/.agents/skills/commit-guards/scripts/install-git-hooks"
+  # A named checkout without an installer is a fixture error, never a
+  # quiet run of the source tree's.
+  [ -z "$INSTALLER_DIR" ] || [ -x "$installer" ] || { echo "harness: no installer under $INSTALLER_DIR" >&2; exit 2; }
   [ -x "$installer" ] || installer="$INSTALL"
   # A commit runs from the checkout's physical path, the ordinary layout:
   # reached through a symlink, the helper drops the main-checkout root it

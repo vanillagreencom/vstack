@@ -117,6 +117,21 @@ fx_symlinked() { # the checkout reached through a symlink, the baked path blanke
   W="$TMP/via-link"
 }
 fx_no_package() { armed no-package; stage a.txt 'hello\n'; blank_baked; rm -rf -- "${R:?}/.agents/skills/commit-guards"; }
+# A project below the work-tree root whose sibling sits under another skill
+# root than the copy: only the project root reaches it.
+fx_project_root() {
+  R="$TMP/project-root"
+  mkdir -p "$R/sub/.agents/skills" "$R/sub/.claude/skills"
+  git -C "$R" init -q
+  identity "$R"
+  cp -R "$GG_SKILL_TEMPLATE" "$R/sub/.agents/skills/commit-guards"
+  ln -s "$SKILL_DIR/../doc-limits" "$R/sub/.claude/skills/doc-limits"
+  "$R/sub/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true
+  printf 'sub/\n' >"$R/.gitignore"
+  settings 'DOC_LIMITS_CLASSES = "*.md=1k"'
+  stage big.md "$(head -c 1025 /dev/zero | tr '\0' x)"
+}
+SUB_SCRIPTS="<repo>/sub/.agents/skills/commit-guards/scripts"
 # A copy installed outside every skill root finds its siblings beside
 # itself: neither the committing tree nor a project root carries them.
 fx_vendored() {
@@ -141,7 +156,8 @@ run_rows \
   "a linked worktree is served by the main checkout's package|fx_linked|$ONE|commit|feat: linked|rc=1 $(lanes '<root>/wt-linked and <repo>' "$SCRIPTS");$BLOCKED|" \
   "a checkout reached through a symlink is still gated, through its own root|fx_symlinked|$ONE|commit-here|feat: via link|rc=1 $BLOCKS|" \
   "with the package gone the search fails closed and names every root|fx_no_package|$ONE|commit|feat: add a|rc=1 kendex-guards: no executable commit-guards pre-commit script at , nor under <repo> or <repo> (project '', roots $ROOTS)|" \
-  "a copy outside every skill root finds doc-limits beside itself, and it gates|fx_vendored|$ONE|commit|feat: add big|rc=1 $(lanes '<repo>' "$VENDOR_SCRIPTS");$BLOCKED|"
+  "a copy outside every skill root finds doc-limits beside itself, and it gates|fx_vendored|$ONE|commit|feat: add big|rc=1 $(lanes '<repo>' "$VENDOR_SCRIPTS");$BLOCKED|" \
+  "a project below the work-tree root finds a sibling under another of its skill roots, and it gates|fx_project_root|$ONE|commit|feat: add big|rc=1 $(lanes '<repo> and <repo>/sub' "$SUB_SCRIPTS");$BLOCKED|"
 
 echo "=== a consumer's hook is given back byte for byte ==="
 over() { R="$(new_repo "$1")"; printf '%b' "$2" >"$R/.git/hooks/pre-commit"; chmod "${3:-0755}" "$R/.git/hooks/pre-commit"; } # NAME BODY [MODE]
@@ -166,6 +182,10 @@ run_rows \
   "a missing --repo path is a usage error|fx_nope||install||rc=2 ::error::install-git-hooks: no such directory: <repo>|" \
   "a directory outside a git work tree is a usage error|fx_notgit||install||rc=2 ::error::install-git-hooks: not inside a git work tree: <repo>|" \
   "an unknown flag is a usage error|fx_fresh||install|--bogus|rc=2 ::error::install-git-hooks: unknown argument '--bogus' (see --help)|"
+# Outside the table because the usage line carries the row separator.
+HELP_RC=0
+HELP_LINE="$("$INSTALL" --help 2>&1 | sed -n 1p)" || HELP_RC=$?
+assert_eq "--help is answered with the usage" "rc=0 usage: install-git-hooks [--repo PATH] [--uninstall | --check]" "rc=$HELP_RC $HELP_LINE"
 
 echo "=== preflight is a lane of the chain, and a broken install of it blocks ==="
 with_preflight() { armed "$1"; ln -s "$SKILL_DIR/../preflight" "$R/.agents/skills/preflight"; } # NAME
@@ -205,11 +225,22 @@ REJECTS='#!/usr/bin/env bash\ncase "${1:-}" in\n  --staged) echo "::error::doc-l
 ECHOED='#!/usr/bin/env bash\necho "::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit; a run would say doc-limits: unknown argument '"'"'--staged'"'"' (see --help)" >&2\nexit 2\n'
 VERDICT='#!/usr/bin/env bash\necho "doc-limits: FAIL ok.txt over its ceiling"\nexit 1\n'
 fx_fork_rejects() { fork fork-rejects "$REJECTS"; }
+# The other four spellings of the grammar, one parser each, without the
+# annotation prefix.
+spelling() { fork "$1" '#!/usr/bin/env bash\ncase "${1:-}" in\n  --staged) echo "'"$2"'" >&2; exit 2 ;;\nesac\nexit 0\n'; } # NAME LINE
+fx_fork_unrecognized_quoted() { spelling fork-unrecognized-quoted "doc-limits: unrecognized option '"'"'--staged'"'"'"; }
+fx_fork_unrecognized_colon() { spelling fork-unrecognized-colon "doc-limits: unrecognized option: --staged"; }
+fx_fork_invalid_colon() { spelling fork-invalid-colon "doc-limits: invalid option: --staged"; }
+fx_fork_invalid_dashes() { spelling fork-invalid-dashes "doc-limits: invalid option -- staged"; }
 fx_fork_echoed() { fork fork-echoed "$ECHOED"; }
 fx_fork_verdict() { fork fork-verdict "$VERDICT"; }
 FORK_SKIP="=== pre-commit: doc-limits at <repo>/.agents/skills/doc-limits/scripts/doc-limits rejects --staged (repo-local replacement) — skipped; this repo's own wiring owns that gate"
 run_rows \
   "a fork whose parser rejects --staged is skipped and the commit proceeds|fx_fork_rejects|$ONE|commit|feat: add ok|rc=0 $DL;::error::doc-limits: unknown argument '--staged' (see --help);$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a parser saying unrecognized option '--staged' is the same skip|fx_fork_unrecognized_quoted|$ONE|commit|feat: add ok|rc=0 $DL;$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a parser saying unrecognized option: --staged is the same skip|fx_fork_unrecognized_colon|$ONE|commit|feat: add ok|rc=0 $DL;$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a parser saying invalid option: --staged is the same skip|fx_fork_invalid_colon|$ONE|commit|feat: add ok|rc=0 $DL;$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
+  "a parser saying invalid option -- staged is the same skip|fx_fork_invalid_dashes|$ONE|commit|feat: add ok|rc=0 $DL;$FORK_SKIP;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$CHAIN_OK;$MSG_OK feat: add ok|" \
   "must-fail: the whole rejection phrase inside a config diagnostic is not a rejection, and the step did not complete|fx_fork_echoed|$ONE|commit|feat: add ok|rc=1 $DL;::error::doc-limits: DOC_LIMITS_CLASSES has an invalid byte limit; a run would say doc-limits: unknown argument '--staged' (see --help);pre-commit: step 'doc-limits' did not complete (exit 2);$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$ERRORS|" \
   "a fork's own verdict blocks like the skill's|fx_fork_verdict|$ONE|commit|feat: add ok|rc=1 $DL;$(skip preflight '<repo>' "$SCRIPTS");$PF_LANES_TAIL;$BLOCKED|"
 
@@ -217,7 +248,10 @@ echo "=== a project name survives every byte it may hold ==="
 # The project the helper was armed from is baked into it as a shell
 # assignment, and a name carrying a quote once ended that assignment early
 # and passed every commit. One name holds each awkward class at once: tab,
-# newline, space, a quote, glob characters and a percent sign.
+# newline, space, a quote, glob characters and a percent sign. The newline
+# and the quote are the classes these rows separate (the kept lines end at
+# the newline, the quote goes through the POSIX escape); the rest ride
+# along so a regression in any of them still shows here.
 TAB="$(printf '\t')"
 NASTY="p${TAB}q r's*?[x]%25"
 nasty() { # NAME — a repository whose project, and its render, sit under the awkward name
