@@ -477,15 +477,15 @@ jobs:
       # Pi 0.84.x is the release the extensions are audited against, so the
       # suites that assert 0.84 wire-format parity install that line rather
       # than the 0.80.5 floor above.
-      # The two pane-preflight cases in pane-cwd-stale.test.ts call
-      # ensureTmux(), which throws when $TMUX is unset; they skip themselves
-      # on a bare runner the same way they already skip off Linux. The whole
-      # directory is globbed, so all test files run here without
-      # editing this step.
+      # The suite's preload starts a tmux server of its own and fails the
+      # run when it cannot, so the runner needs the tmux binary; the
+      # GitHub image does not carry it. The whole directory is globbed, so
+      # all test files run here without editing this step.
       - name: pi-agents-tmux suite
         if: matrix.shard == 'node'
         working-directory: pi-extensions/pi-agents-tmux
         run: |
+          command -v tmux >/dev/null || { sudo apt-get update && sudo apt-get install -y tmux; }
           npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund @earendil-works/pi-agent-core@0.84.1 @earendil-works/pi-ai@0.84.1 @earendil-works/pi-coding-agent@0.84.1 @earendil-works/pi-tui@0.84.1 typebox
           npm test
 
