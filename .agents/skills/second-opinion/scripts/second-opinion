@@ -294,6 +294,12 @@ if ! PROJECT_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)
   # read, from a checkout that does carry settings, so it refuses. Any message
   # this does not recognise refuses too. hooks/block-worktree-refresh.sh splits
   # the same diagnostic the same way.
+  #
+  # The limit of reading the message: an EMPTY or malformed `.git` DIRECTORY
+  # draws the parenthetical too, so it lands here as an absence. Separating
+  # that from a true absence takes an ancestor walk for a `.git` entry, which
+  # the hook above owns; this does not carry a second copy of it. Git itself
+  # reports no repository in that state, so no root could be resolved anyway.
   case "$_git_diag" in
     *"not a git repository (or any"*) PROJECT_ROOT="" ;;
     *)
