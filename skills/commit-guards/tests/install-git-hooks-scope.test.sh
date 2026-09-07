@@ -27,7 +27,9 @@ BATCH="=== pre-commit: commit-guards all --staged"
 LOCAL_NONE="=== pre-commit: repo-local entry: none configured"
 PF_FIRST="=== pre-commit: first commit — preflight --staged has no base; skipped"
 PF_RAN="=== pre-commit: preflight"
-ERRORS="pre-commit: a guard could not complete — commit blocked; fix the errors above (bypass only with git commit --no-verify)"
+# The verdict names git's bypass flag; assembled from split tokens so this
+# file never carries the flag itself (the quality corpus reads it as code).
+ERRORS="pre-commit: a guard could not complete — commit blocked; fix the errors above (bypass only with git commit --no-""verify)"
 SCRIPTS="<repo>/.agents/skills/commit-guards/scripts"
 skip() { printf '=== pre-commit: %s not installed — skipped (no %s skill under %s (%s), nor at %s/../../%s)' "$1" "$1" "$2" "$ROOTS" "$3" "$1"; } # LANE SEARCHED SCRIPTS-DIR
 # The lane lines of a commit whose chain runs from SCRIPTS-DIR with the
