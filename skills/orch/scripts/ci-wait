@@ -21,7 +21,7 @@ deterministically (kendex#454). Auto-retries transient infrastructure
 failures (max 1 retry).
 
   <PR#>          pull request number (required)
-  poll_interval  seconds between polls (default 15)
+  poll_interval  seconds between polls (default 180, the floor: the GitHub API budget is shared by every lane)
   max_wait       total budget in seconds (default 600)
   --json         emit the machine-readable result object on stdout
 
@@ -116,7 +116,7 @@ if [ "${#POSITIONAL[@]}" -lt 1 ]; then
 fi
 
 PR_NUM="${POSITIONAL[0]}"
-POLL_INTERVAL="${POSITIONAL[1]:-15}"
+POLL_INTERVAL="${POSITIONAL[1]:-180}"
 MAX_WAIT="${POSITIONAL[2]:-600}"
 
 if ! [[ "$PR_NUM" =~ ^[0-9]+$ ]] || [ "$PR_NUM" -lt 1 ]; then

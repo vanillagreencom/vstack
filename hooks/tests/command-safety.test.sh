@@ -42,6 +42,23 @@ check 0 'scripts/validate qml' 'isolated validation'
 check 0 'git status' 'unrelated shell command'
 check 0 'qs -c test-fixture' 'a different configured shell'
 
+project_settings() { # this repository's own policy, kendex.settings.toml
+  printf '[env]\n' >"$repo/kendex.settings.toml"
+  awk '/^COMMAND_SAFETY_DENY_PATTERN = / { print; found++ } END { if (found != 1) exit 1 }' \
+    "$ROOT/kendex.settings.toml" >>"$repo/kendex.settings.toml"
+}
+project_settings
+while IFS='|' read -r expected command label; do
+  check "$expected" "$command" "$label"
+done <<'ROWS'
+2|systemd-run --user --scope -p MemoryMax=64M cargo test -p kendex-core|a systemd-run scope capped in megabytes is refused
+2|systemd-run --user --scope --property=MemoryHigh=512K ./target/debug/review_fixes|a systemd-run scope capped in kilobytes is refused
+0|systemd-run --user --scope --slice=agents.slice cargo test -p kendex-core|an uncapped systemd-run scope is allowed
+0|systemd-run --user --scope -p MemoryMax=2G cargo test -p kendex-core|a systemd-run scope capped at a gigabyte is allowed
+ROWS
+settings
+check 0 'systemd-run --user --scope -p MemoryMax=64M cargo test -p kendex-core' 'the memory-cap refusal is the project pattern, not the hook'
+
 printf '[env]\n' >"$repo/kendex.settings.toml"
 check 0 'git status' 'an unconfigured project leaves the hook inactive'
 check 0 'git status' 'a global hook outside Git leaves the hook inactive' /

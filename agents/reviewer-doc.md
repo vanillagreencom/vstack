@@ -19,7 +19,7 @@ The method is verification, not proofreading. **Open the implementation behind e
 - **Citations**: cited paths exist and are tracked; cited symbols and tests exist AND actually exercise what they are cited for; documented settings keys match consumed keys, both directions. (Preflight or a project doc checker may cover path existence deterministically. Cite their output, spend your pass on what only reading code can verify.)
 - **Self-consistency**: a doc contradicting itself (diagram vs prose), violating the rule it introduces, or restating content it declares single-sourced elsewhere.
 - **Comments and prose**: changed comments or docs that contradict the code, narrate revision history or provenance, or claim more than the adjacent assertion enforces.
-- **Moved prose**: relocated help text, README, schema, and changelog prose is new prose. Verify it sentence by sentence against the code it now describes, never against the file it moved from.
+- **Moved prose**: relocated help text, README, schema, and changelog prose is new prose. Verify it sentence by sentence against the code it now describes, never against the file it moved from. For a move or rewording of a contract claim, check every moved claim against the package's own must-fail suites and the code, not only the implementation's current text.
 - **Blast radius**: when the diff changes behavior, sweep the docs that describe that behavior. Stale docs elsewhere in the repo are in scope when this diff invalidates them.
 
 A finding in a class `.agents/skills/orch/references/finding-disposition.md` Step 0 excludes is declined before its truth is examined. Do not write it. For a symlink, `..`, or malformed input, name the shipped producer emitting it or write nothing.

@@ -96,7 +96,7 @@ Blockers or any `fix`/`issue` suggestion → § 4. Otherwise → § 5.
 
 ## 4. Present And Fix
 
-Collect the blockers, the `category == "fix"` suggestions, and the `category == "issue"` suggestions. Decline anything that cannot affect real usage with a one-line reason, per [SKILL.md § The Cycle](../SKILL.md#the-cycle). Nothing left → § 5.
+Collect the blockers, the `category == "fix"` suggestions, and the `category == "issue"` suggestions. Read `patched_causes` and `frozen_causes` first, with the command [finding-disposition.md § Recurrence](../references/finding-disposition.md#recurrence) states; a finding sharing a cause there takes that section's disposition, never another patch. Decline anything that cannot affect real usage with a one-line reason, per [SKILL.md § The Cycle](../SKILL.md#the-cycle). Nothing left → § 5.
 
 <output_format>
 

@@ -268,8 +268,8 @@ echo "=== frozen cross-skill contracts ==="
 # are owned elsewhere, so a signature change here silently breaks every review.
 reviewer_skill="$REPO_ROOT/skills/reviewer/SKILL.md"
 if [[ -f "$reviewer_skill" ]]; then
-  assert_file_contains "$reviewer_skill" '.agents/skills/orch/scripts/review-artifact-check [WORKTREE_PATH] [AGENT] 0' \
-    "reviewer skill calls the frozen review-artifact-check positional contract"
+  assert_file_contains "$reviewer_skill" '.agents/skills/orch/scripts/review-artifact-check --file [ARTIFACT_PATH]' \
+    "reviewer skill self-validates through the frozen review-artifact-check --file contract"
 else
   # Skipping on absence would retire the only check on this frozen signature the
   # moment the file is renamed or moved — exactly when it needs asserting.

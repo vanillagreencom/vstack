@@ -59,6 +59,7 @@ A new or modified check, guard, assertion, or test ships with a must-fail contro
 - N planted defects means N asserted rows. A fixture that plants several defects under one verdict passes while any one of them is caught, and is never allowed.
 - Shaped input (positions, settings keys, tamper classes) is one table-driven case: one loop, one assertion per row, the row list visible in the file.
 - Assert the code, the enum or the exit status. Pin a human-readable message only inside a contract a consumer parses.
+- A row pins the clause only its own guard emits: an expectation a neighbouring gate or the production helper on both sides can also produce is not a pin, a value read as a truthiness bit is not a pin, and a fold keeps every assertion of its former cases.
 - No test of the test harness: a pin on a manifest script string or a runner configuration proves nothing about behaviour.
 - A shared fixture is a neutral world (a seeded repository, a fake SDK). A fixture that carries a planted defect is private to its case.
 - One file per surface, beside the code, named for the surface.
