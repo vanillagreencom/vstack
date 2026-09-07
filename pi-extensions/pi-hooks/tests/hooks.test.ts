@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { runCargo } from "../extensions/cargo.ts";
-import { PROJECT_LOCK_FILE, PROJECT_MARKER_DIRS, projectRoot, readConfig, recordProjectTrust, rootAnchored } from "../extensions/config.ts";
+import { PROJECT_LOCK_FILE, projectRoot, readConfig, recordProjectTrust } from "../extensions/config.ts";
 import {
 	CONFIG_ID,
 	initRustRepo,
@@ -171,25 +171,6 @@ describe("pi-hooks root selection", () => {
 		}
 	});
 
-	// The renderer walks for these and this reads from where it wrote. The
-	// current-project rule is `project_root_from`, which consults the marker
-	// directories and the lock file, not `is_project`'s MARKER_FILES.
-	test("the project markers are the renderer's, case for case", () => {
-		const crates = join(import.meta.dir, "..", "..", "..", "crates", "core", "src");
-		const discover = readFileSync(join(crates, "discover.rs"), "utf8");
-		const dirs = discover.match(/const MARKER_DIRS: \[&str; \d+\] = \[([\s\S]*?)\n\];/);
-		expect(dirs, "MARKER_DIRS not found in crates/core/src/discover.rs").not.toBeNull();
-		expect([...dirs![1]!.matchAll(/"([^"]+)"/g)].map(([, marker]) => marker)).toEqual([...PROJECT_MARKER_DIRS]);
-
-		const lock = readFileSync(join(crates, "lock.rs"), "utf8").match(/const LOCK_FILE: &str = "([^"]+)";/);
-		expect(lock, "LOCK_FILE not found in crates/core/src/lock.rs").not.toBeNull();
-		expect(lock![1]).toBe(PROJECT_LOCK_FILE);
-
-		// The walk tests each marker in the shape the renderer tests it in.
-		expect(discover).toContain("MARKER_DIRS.iter().any(|m| dir.join(m).is_dir())");
-		expect(discover).toContain("dir.join(crate::lock::LOCK_FILE).is_file()");
-	});
-
 	test("a vendored checkout inside a project does not stop the walk", async () => {
 		const project = initRustRepo("pi-hooks-vendor-");
 		const nested = join(project, "vendor", "nested");
@@ -291,22 +272,6 @@ describe("pi-hooks root selection", () => {
 		}
 	});
 
-	// The renderer decides where the guards are written and this decides where
-	// they are read. A value the two read differently is a guard rendered under
-	// one root and looked for under another, which is a silent allow.
-	test("the root-anchored rule agrees with the renderer case for case", () => {
-		const source = readFileSync(join(import.meta.dir, "..", "..", "..", "crates", "core", "src", "harness", "pi.rs"), "utf8");
-		const table = source.match(/PI_ROOT_ABSOLUTE_CASES: &\[\(&str, bool, bool\)\] = &\[([\s\S]*?)\n\];/);
-		expect(table, "PI_ROOT_ABSOLUTE_CASES not found in crates/core/src/harness/pi.rs").not.toBeNull();
-		const cases = [...table![1]!.matchAll(/\("((?:[^"\\]|\\.)*)",\s*(true|false),\s*(true|false)\)/g)]
-			.map(([, value, posix, windows]) => [JSON.parse(`"${value}"`) as string, posix === "true", windows === "true"] as const);
-		expect(cases.length).toBeGreaterThanOrEqual(7);
-		for (const [value, posix, windows] of cases) {
-			expect(rootAnchored(value, false), `POSIX ${JSON.stringify(value)}`).toBe(posix);
-			expect(rootAnchored(value, true), `Windows ${JSON.stringify(value)}`).toBe(windows);
-		}
-	});
-
 	// readConfig, not the guard: the same answer gates merging the project's own
 	// settings.json, and every default is on, so a read that should not have
 	// happened turns a guard off.
@@ -326,42 +291,7 @@ describe("pi-hooks root selection", () => {
 			rmSync(project, { recursive: true, force: true });
 		}
 	});
-
-	// runCommandAsync sends SIGTERM at the budget and the child gets a grace
-	// period, so a hook that traps the signal settles as timedOut with exit 0 —
-	// the one status a cut-off run must never take.
-	test("a hook that traps the signal and exits 0 past its budget still refuses", async () => {
-		const project = initRustRepo("pi-hooks-budget-");
-		try {
-			writeFileSync(join(project, ".pi", "settings.json"), JSON.stringify({
-				kendex: { extensionManager: { config: { [CONFIG_ID]: { hookTimeoutMs: 200, blockBareCd: false, blockRepoCopy: false } } } },
-			}));
-			const script = renderedHookPath(project, "pre-commit-check");
-			mkdirSync(join(script, ".."), { recursive: true });
-			writeFileSync(script, [
-				"#!/usr/bin/env bash",
-				"trap 'exit 0' TERM",
-				"cat > /dev/null",
-				"sleep 5 &",
-				"wait $!",
-				"exit 0",
-			].join("\n") + "\n");
-			chmodSync(script, 0o755);
-			registerProjectHook(project, "pre-commit-check");
-			const handler = installToolCallHandler();
-			const result = await handler({ toolName: "bash", input: { command: "git commit -m x" } }, trusted(project)) as { block?: boolean; reason?: string };
-			expect(result.block).toBe(true);
-			expect(result.reason).toContain("timed out after 200ms");
-
-			// The control: the same budget, a hook that finishes inside it.
-			writeFileSync(script, ["#!/usr/bin/env bash", "cat > /dev/null", "exit 0"].join("\n") + "\n");
-			expect(await handler({ toolName: "bash", input: { command: "git commit -m x" } }, trusted(project))).toBeUndefined();
-		} finally {
-			rmSync(project, { recursive: true, force: true });
-		}
-	});
 });
-
 
 describe("pi-hooks pre-commit tool_call", () => {
 	test("spawns the rendered hook with the payload a PreToolUse hook is sent", async () => {

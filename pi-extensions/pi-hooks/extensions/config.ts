@@ -20,10 +20,9 @@ export const DEFAULTS = {
 	sessionDriftCheck: true,
 	clippyTimeoutMs: 30000,
 	driftCheckTimeoutMs: 30000,
-	hookTimeoutMs: 60000,
 } as const;
 
-export type HookKey = Exclude<keyof typeof DEFAULTS, "clippyTimeoutMs" | "driftCheckTimeoutMs" | "hookTimeoutMs">;
+export type HookKey = Exclude<keyof typeof DEFAULTS, "clippyTimeoutMs" | "driftCheckTimeoutMs">;
 
 function expandHome(input: string): string {
 	if (input === "~") return homedir();
@@ -77,7 +76,7 @@ export function piUserDir(): string {
  * `crates/cli/src/commands/mod.rs`), and it reads the marker directories and the
  * lock file alone; `is_project` answers which repositories a scan should offer.
  */
-export const PROJECT_MARKER_DIRS = [".claude", ".codex", ".opencode", ".cursor", ".pi", ".agents", ".gemini"] as const;
+const PROJECT_MARKER_DIRS = [".claude", ".codex", ".opencode", ".cursor", ".pi", ".agents", ".gemini"] as const;
 export const PROJECT_LOCK_FILE = ".kendex-lock.json";
 
 /** A path with symlinks resolved, or its plain resolution when the filesystem
@@ -226,7 +225,7 @@ export function getBool(cfg: kendexConfig, key: HookKey | "enabled"): boolean {
 	return typeof v === "boolean" ? v : (DEFAULTS[key] as boolean);
 }
 
-export function getNumber(cfg: kendexConfig, key: "clippyTimeoutMs" | "driftCheckTimeoutMs" | "hookTimeoutMs"): number {
+export function getNumber(cfg: kendexConfig, key: "clippyTimeoutMs" | "driftCheckTimeoutMs"): number {
 	const v = cfg[key];
 	if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
 	if (typeof v === "string") {

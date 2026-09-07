@@ -53,6 +53,6 @@ Open `/extensions:settings`; settings appear under the **Hooks** tab. Project se
 - `enabled`: package toggle; a custom hook has no toggle of its own and rides this one.
 - `blockBareCd`, `blockRepoCopy`, `preCommitCheck`: one toggle per shipped guard.
 - `taskCompletedCheck`, `sessionDriftCheck`: the end-of-turn clippy advisory and the session-start drift report. These two run natively and are not in the registry; the same setting also turns off a registered `task-completed-check` or `session-drift-check` hook.
-- `hookTimeoutMs`, `clippyTimeoutMs`, `driftCheckTimeoutMs`: the time budgets; a hook past its budget refuses the call.
+- `clippyTimeoutMs`, `driftCheckTimeoutMs`: the time budgets of the two native checks. A registered hook runs to the `timeout` its registration declares, 60 seconds where it declares none, and one past its budget refuses the call.
 
 Maintainer notes are in [DEVELOPMENT.md](DEVELOPMENT.md).

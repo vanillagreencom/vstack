@@ -1,6 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { getBool, getNumber, type HookKey, type kendexConfig } from "./config.js";
+import { getBool, type HookKey, type kendexConfig } from "./config.js";
 import { runCommandAsync } from "./process.js";
 import { type RegisteredHook, registeredHooks } from "./registry.js";
 
@@ -48,9 +48,14 @@ export type HookOutcome =
 	| { ran: true; exitCode: number; stdout: string; stderr: string };
 
 /**
+ * The budget for a registration that declares no `timeout`: the 60 seconds
+ * Claude Code gives such a hook, so one registry means one budget everywhere.
+ */
+const DEFAULT_BUDGET_MS = 60_000;
+
+/**
  * Spawn one registered hook and say what happened. The budget is the
- * registration's own `timeout`, capped by `ceilingMs` (`hookTimeoutMs` from
- * settings).
+ * registration's own `timeout`, or [`DEFAULT_BUDGET_MS`] where it names none.
  *
  * The budget is read BEFORE any exit code, because a killed process still has
  * one. `runCommandAsync` sends SIGTERM at the budget and the child gets a
@@ -69,9 +74,9 @@ export type HookOutcome =
  * carrying the flag without one goes to the spawn, whose status names its own
  * cause.
  */
-export async function runHook(hook: RegisteredHook, payload: string, ctx: ExtensionContext, ceilingMs: number): Promise<HookOutcome> {
+export async function runHook(hook: RegisteredHook, payload: string, ctx: ExtensionContext): Promise<HookOutcome> {
 	if (hook.missing && hook.script !== undefined) return { ran: false, missing: hook.script };
-	const budgetMs = Math.min(hook.budgetMs ?? ceilingMs, ceilingMs);
+	const budgetMs = hook.budgetMs ?? DEFAULT_BUDGET_MS;
 	const args = hook.script === undefined ? ["-c", hook.command] : [hook.script];
 	const result = await runCommandAsync("bash", args, ctx.cwd, budgetMs, payload);
 	if (result.timedOut) return { ran: false, timedOutAfterMs: budgetMs };
@@ -116,12 +121,11 @@ export async function runListener(
 ): Promise<ListenerRun> {
 	const registry = registeredHooks(listener, subject, project, trusted);
 	if (registry.unreadable !== undefined) return { results: [], unreadable: registry.unreadable };
-	const ceilingMs = getNumber(cfg, "hookTimeoutMs");
 	const results: HookResult[] = [];
 	for (const hook of registry.hooks) {
 		const setting = GUARD_SETTINGS.get(hook.name);
 		if (setting !== undefined && !getBool(cfg, setting)) continue;
-		const result = { hook, outcome: await runHook(hook, payload, ctx, ceilingMs) };
+		const result = { hook, outcome: await runHook(hook, payload, ctx) };
 		results.push(result);
 		if (stop?.(result)) break;
 	}

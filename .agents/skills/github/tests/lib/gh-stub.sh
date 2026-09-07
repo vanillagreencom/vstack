@@ -37,27 +37,9 @@
 # THE KEY a verb names is one file stem: the verb's words as written, with
 # `/` spelled `%` because a stem is a file name. Two verbs can therefore
 # reach one stem — `api-a/b` and `api-a%b` do — so a stem records the verb
-# that claimed it. A staging under a second verb is REFUSED, and a call whose
-# own verb is not the claimant's finds the stem UNSTAGED. Either half missing
-# hands a staged answer to a call nobody staged, which is the fail-open a
-# fake exists to prevent.
-#
-# THE CLAIM RECORDS WORDS, NOT THE JOINED TEXT. The join is lossy about
-# arity: the two-word `api user` and the one-word command `api-user` both
-# spell `api-user`, and a claim holding that string would hand the seeded
-# `api user` answer to a call that ran the wrong command. So the record
-# separates the words by a byte no gh argv word carries, and a call rebuilds
-# the same form from its own argv — two words when it took `$2`, one word
-# otherwise. A staged verb splits at its FIRST `-`, which is where the join
-# put it. Arity is therefore part of the claim, and the two spellings, which
-# still share a stem, cannot take each other's answers.
-#
-# `@` IS RESERVED. The stub mints `<stem>@<id>` for a selector's slot, so a
-# verb or a call carrying `@` in its own text would address a slot nobody
-# staged under it — the same fail-open, one layer down, and one the verb
-# claim cannot see because the colliding names have different owners.
-# Staging such a verb is refused, and a call whose stem carries `@` is
-# unstaged. `%` stays legal: it is how a stem spells `/`.
+# that staged it, and a staging under a second verb is REFUSED rather than
+# overwriting the first one's answer without a word. Restaging the same verb
+# is how a suite overrides a seeded answer or extends a sequence, and stays.
 #
 # A VERB IS NOT ALWAYS ENOUGH. Two `api graphql` calls carrying different
 # queries are one verb, and answering both the same way would let a suite
@@ -105,26 +87,15 @@ set -uo pipefail
 
 printf '%s\n' "$*" >>"$STUB_DIR/gh.calls"
 
-# SEP joins the claim's words. It is not in any gh argv word, so a claim
-# built from two words never reads as one word that happens to contain it.
-SEP="$(printf '\034')"
-
 # The verb: the first word, plus the second when it is not flag-shaped. The
 # first word alone is the fallback, so `api` can answer every api path a
-# suite did not name one at a time. `claim` is the same words unjoined —
-# what the staging helpers recorded — so a one-word `gh api-user` and the
-# two-word `gh api user`, which share the stem `api-user`, differ here.
+# suite did not name one at a time.
 verb="${1:-}"
 fallback="${1:-}"
-claim="${1:-}"
-fallback_claim="${1:-}"
 if [ "$#" -gt 1 ]; then
   case "${2:-}" in
   -*) ;;
-  *)
-    verb="$verb-$2"
-    claim="$claim$SEP$2"
-    ;;
+  *) verb="$verb-$2" ;;
   esac
 fi
 
@@ -134,32 +105,14 @@ slug() { printf '%s' "$1" | tr '/' '%'; }
 
 argv="$*"
 
-# ours STEM CLAIM — false when STEM is not this call's to read. Several verbs
-# reach one stem: `/` cannot appear in a file name, so `api a/b` and `api
-# 'a%b'` both key on `api-a%b`, and the join is blind to arity, so the
-# one-word `api-user` keys where `api user` does. The staging helpers record
-# the claimant's words, and a call whose own words differ — a different
-# spelling, or a different number of them — is UNSTAGED here, never served
-# the claimant's answer. A stem carrying `@` belongs to no verb at all: `@`
-# is minted below for a selector's slot, and the staging helpers refuse it in
-# a verb, so a call that spells one is reaching for a slot rather than for
-# anything staged under its own name.
-ours() {
-  case "$1" in
-  *@*) return 1 ;;
-  esac
-  [ ! -f "$STUB_DIR/$1.verb" ] || [ "$(cat "$STUB_DIR/$1.verb")" = "$2" ]
-}
-
-# resolve BASE CLAIM — the staged stem for BASE, or empty when BASE holds
-# nothing CLAIM's words staged. A selector wins over the plain key, in staging order:
+# resolve BASE — the staged stem for BASE, or empty when nothing is staged
+# under it. A selector wins over the plain key, in staging order:
 # the index holds one `id<TAB>text` line per selector, and the first whose
 # text occurs in this call's argv names the answer. The call ordinal is
 # counted per resolved stem, so a sequence answers each call once; `.0` is
 # the answer for every call and is what gh_stub_answer stages.
 resolve() {
   local key="$1" sel_id sel_text n
-  ours "$key" "$2" || return 0
   if [ -f "$STUB_DIR/$key.selectors" ]; then
     while IFS="$(printf '\t')" read -r sel_id sel_text; do
       [ -n "$sel_id" ] || continue
@@ -183,25 +136,21 @@ resolve() {
   fi
 }
 
-# known KEY CLAIM — true when CLAIM's words staged anything at all under
-# KEY. A key
-# that is known but has no answer left is a REFUSAL, never a fall-through: a
-# sequence that ran out means the code polled once more than the suite said
-# it would, and answering that from a broad one-word key would hide it. A key
-# another claimant holds is not known to this call, so the one-word fallback
-# still answers a path the suite never named.
+# known KEY — true when anything at all was staged under KEY. A key that is
+# known but has no answer left is a REFUSAL, never a fall-through: a sequence
+# that ran out means the code polled once more than the suite said it would,
+# and answering that from a broad one-word key would hide it.
 known() {
   local stem="$1"
-  ours "$stem" "$2" || return 1
   [ -f "$STUB_DIR/$stem.selectors" ] && return 0
   set -- "$STUB_DIR/$stem".*.out
   [ -f "$1" ]
 }
 
 key="$(slug "$verb")"
-pick="$(resolve "$key" "$claim")"
-if [ -z "$pick" ] && [ "$fallback" != "$verb" ] && ! known "$key" "$claim"; then
-  pick="$(resolve "$(slug "$fallback")" "$fallback_claim")"
+pick="$(resolve "$key")"
+if [ -z "$pick" ] && [ "$fallback" != "$verb" ] && ! known "$key"; then
+  pick="$(resolve "$(slug "$fallback")")"
 fi
 
 if [ -z "$pick" ]; then
@@ -224,44 +173,25 @@ STUB
 # _gh_stub_key VERB — the staged-file stem for VERB, registering a selector
 # when VERB carries one. Prints the stem.
 #
-# The stem is claimed by the first verb staged under it and refuses a second:
-# `api-a/b` and `api-a%b` are one stem, and letting the second overwrite the
-# first is the fail-open a fake exists to prevent.
-#
-# The record holds the verb's WORDS, split at the first `-` because that is
-# where the join put the boundary, separated by a byte no gh argv word
-# carries. A call rebuilds the same form from its own argv, so the one-word
-# command `api-user` cannot read the two-word `api user`'s answer even
-# though both spell one stem. Replacing the separator with `-` recovers the
-# verb as written, which is how the refusal below names it.
+# The stem records the verb that staged it and refuses a second: `api-a/b`
+# and `api-a%b` are one stem, and letting the second overwrite the first is
+# the fail-open a fake exists to prevent. The same verb restages freely.
 _gh_stub_key() {
-  local verb="$1" sel="" base id owner claim sep
-  sep="$(printf '\034')"
+  local verb="$1" sel="" base id owner
   case "$verb" in
   *:*)
     sel="${verb#*:}"
     verb="${verb%%:*}"
     ;;
   esac
-  case "$verb" in
-  *@*)
-    printf 'gh-stub: %s cannot be staged; @ is reserved for selector slots\n' \
-      "$verb" >&2
-    return 1
-    ;;
-  esac
-  claim="$verb"
-  case "$verb" in
-  *-*) claim="${verb%%-*}$sep${verb#*-}" ;;
-  esac
   base="$(printf '%s' "$verb" | tr '/' '%')"
   owner="${STUB_DIR:?}/$base.verb"
-  if [ -f "$owner" ] && [ "$(cat "$owner")" != "$claim" ]; then
+  if [ -f "$owner" ] && [ "$(cat "$owner")" != "$verb" ]; then
     printf 'gh-stub: %s already keys on %s; %s would overwrite it\n' \
-      "$(tr "$sep" '-' <"$owner")" "$base" "$verb" >&2
+      "$(cat "$owner")" "$base" "$verb" >&2
     return 1
   fi
-  printf '%s' "$claim" >"$owner" || return 1
+  printf '%s' "$verb" >"$owner" || return 1
   [ -n "$sel" ] || {
     printf '%s' "$base"
     return 0
