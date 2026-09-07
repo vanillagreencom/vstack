@@ -2,8 +2,15 @@
 # core.hooksPath, in both modes: set at all is a stand-down. The install
 # writes nothing into a directory git would not read, and `--check` verifies
 # only the directory this package writes rather than grading a redirected
-# one. The cost is pinned here as a cost — a hand-wired directory that
-# really does gate is answered "could not determine", never "not armed".
+# one; the cost is pinned as a cost, a hand-wired directory that really does
+# gate answered "could not determine", never "not armed". The stand-down is
+# one statement, git's own report of where the value is set, and one
+# sentence naming no path and no command. One table: a row builds its own
+# repository, sets the value one way, runs one action and reads back the
+# exit status with every line printed, the stderr block included, then the
+# hooks directory as one line. Arming and the gate are
+# install-git-hooks.test.sh, --check install-git-hooks-check.test.sh,
+# rediscovery and the sibling lanes install-git-hooks-scope.test.sh.
 set -euo pipefail
 TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/harness.bash
@@ -11,388 +18,153 @@ TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/install-hooks.bash
 . "$TEST_DIR/lib/install-hooks.bash"
 
-echo "=== an empty core.hooksPath is hooks off, in this checker too ==="
-# The third file this has come up in. Empty switches hooks off, and
-# rev-parse reports ./ for it, so measuring that directory answers about the
-# repository root — armed, if the root happens to hold the right shapes.
-R62="$(new_repo hooks-off)"
-install_in "$R62"
-check_in "$R62"
-[ "$RC" -eq 0 ] && ok "the control: armed before the value is set" \
-  || bad "control not armed" "rc=$RC out=$OUT"
-git -C "$R62" config core.hooksPath ""
-cp "$R62/.git/hooks/kendex-guards" "$R62/kendex-guards"
-cp "$R62/.git/hooks/pre-commit" "$R62/pre-commit"
-cp "$R62/.git/hooks/commit-msg" "$R62/commit-msg"
-check_in "$R62"
-[ "$RC" -eq 1 ] && ok "an empty value reads NOT armed, not armed-at-the-root" \
-  || bad "empty hooksPath verdict" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"switches git hooks off"*) ok "and says what is actually wrong" ;;
-  *) bad "the verdict does not name the cause" "$OUT" ;;
-esac
-case "$OUT" in
-  *"core.hooksPath is set."*) ok "and states that the value is set" ;;
-  *) bad "no stand-down statement" "$OUT" ;;
-esac
-install_in "$R62"
-case "$OUT" in
-  *"switches git hooks off"*) ok "and install says the same rather than writing" ;;
-  *) bad "install did not name the empty value" "$OUT" ;;
-esac
+# The stand-down block, as the installer prints it to stderr: the statement,
+# git's report rendered by %q (scope, origin and value on one tab-separated
+# line), the sentence. ORIGIN is the report line with the value aliased.
+SET_LINE="  core.hooksPath is set."
+CLEAR="  Clear the setting at its source, then run kendex guard install."
+UNLISTED="  Its origin could not be listed."
+local_origin() { printf "  \$'local\\\\tfile:.git/config\\\\t%s'" "$1"; } # VALUE as %q renders it
+block() { printf '%s;%s;%s' "$SET_LINE" "$1" "$CLEAR"; } # ORIGIN-LINE
+# The install lane's warning and skip around the block; the check lane's
+# verdicts. Every value but the empty one is "set (VALUE)".
+skipped() { printf '::warning::install-git-hooks: core.hooksPath is set (%s); this installer writes <repo>/.git/hooks only and will not write behind a configured hooks path, so the guard shims were NOT installed;%s;commit-guards git hooks: skipped — core.hooksPath is set (%s)' "$1" "$2" "$1"; } # VALUE BLOCK
+undetermined() { printf '%s;commit-guards git hooks: could not determine whether commits are gated — core.hooksPath is set (%s), and a configured hooks path is outside this verifier'"'"'s contract: it reads <repo>/.git/hooks only; git'"'"'s report of where it is set is on stderr, or read the configured directory yourself' "$2" "$1"; } # VALUE BLOCK
+OFF_WARN="::warning::install-git-hooks: core.hooksPath is set and empty, which switches git hooks off entirely, so the guard shims were NOT installed"
+OFF_CHECK="commit-guards git hooks: NOT armed — core.hooksPath is set and empty, which switches git hooks off, so commits are NOT gated; git's report of where it is set is on stderr"
+NONE="helper=absent pre-commit=absent commit-msg=absent"
+set_value() { git -C "$R" config core.hooksPath "$1"; } # VALUE
 
-echo "=== core.hooksPath set at all is a stand-down ==="
-# Whether the configured directory is in fact this repository's own would
-# be worked out here — resolved on disk, `..` folded on paper, a relative
-# value absolutized against the work tree. Every one of those was another
-# way to be subtly wrong, and two of them were. Set is set: the installer
-# writes nothing git might not read. It costs an arming; it never costs a
-# repository that reads armed and gates nothing.
-for spelling in default-relative default-absolute elsewhere empty; do
-  R70="$(new_repo "set-$spelling")"
-  case "$spelling" in
-    default-relative) VALUE=".git/hooks" ;;
-    default-absolute) VALUE="$R70/.git/hooks" ;;
-    elsewhere) VALUE="$R70/otherhooks" ;;
-    empty) VALUE="" ;;
-  esac
-  git -C "$R70" config core.hooksPath "$VALUE"
-  install_in "$R70"
-  [ -e "$R70/.git/hooks/kendex-guards" ] \
-    && bad "installed under core.hooksPath ($spelling)" "out=$OUT" \
-    || ok "core.hooksPath set stands the install down ($spelling)"
-  # A deliberate skip, stated on stdout: exit 0, never a failure a caller
-  # such as kendex refresh would report.
-  [ "$RC" -eq 0 ] && ok "and the stand-down is exit 0 ($spelling)" \
-    || bad "the stand-down is exit 0 ($spelling)" "rc=$RC out=$OUT"
-  # One remedy, and it is the one that arms. The recipe this would print —
-  # wire that directory's hooks to these scripts yourself — prescribed a
-  # shape `--check` has no way to verify, so following it left a repository
-  # permanently unable to say whether it was gated.
-  case "$OUT" in
-    *"core.hooksPath is set."*"Clear the setting at its source, then run kendex guard install."*)
-      ok "and it states the setting, then says to clear it at its source ($spelling)" ;;
-    *) bad "no stand-down text ($spelling)" "$OUT" ;;
-  esac
-  case "$OUT" in
-    *"Have that directory's pre-commit run"*)
-      bad "a hand-wiring recipe is still prescribed ($spelling)" "$OUT" ;;
-    *) ok "and no hand-wiring recipe ($spelling)" ;;
-  esac
-  case "$spelling" in
-    empty) case "$OUT" in
-      *"switches git hooks off"*) ok "and empty is told apart in the message" ;;
-      *) bad "empty was not named" "$OUT" ;;
-    esac ;;
-  esac
-done
+echo "=== an empty value switches git hooks off, and neither mode reads the repository root instead ==="
+# rev-parse reports ./ for the empty value, so a checker measuring that
+# directory would grade the repository root: armed, if the root happens to
+# hold the right shapes, which these fixtures make sure it does.
+copies_at_root() { cp "$R/.git/hooks/kendex-guards" "$R/.git/hooks/pre-commit" "$R/.git/hooks/commit-msg" "$R/"; }
+fx_off_check() { armed off-check; copies_at_root; set_value ""; }
+fx_off_install() { R="$(new_repo off-install)"; set_value ""; }
+fx_off_install_armed() { armed off-install-armed; copies_at_root; set_value ""; }
+run_rows \
+  "the empty value is NOT armed, never armed at the root|fx_off_check||check||rc=1 $(block "$(local_origin '')");$OFF_CHECK|helper=$OURS pre-commit=$SHIM_PRE commit-msg=$SHIM_MSG hooksPath=''" \
+  "the install says the same rather than writing|fx_off_install||install||rc=0 $OFF_WARN;$(block "$(local_origin '')");commit-guards git hooks: skipped — core.hooksPath is set ('')|$NONE hooksPath=''" \
+  "and leaves an earlier arming as it was|fx_off_install_armed||install||rc=0 $OFF_WARN;$(block "$(local_origin '')");commit-guards git hooks: skipped — core.hooksPath is set ('')|helper=$OURS pre-commit=$SHIM_PRE commit-msg=$SHIM_MSG hooksPath=''"
 
-# The must-fail control: with nothing set, the same repository arms.
-R71="$(new_repo unset-arms)"
-install_in "$R71"
-[ -x "$R71/.git/hooks/kendex-guards" ] \
-  && ok "must-fail: with core.hooksPath unset the install arms" \
-  || bad "unset did not arm" "out=$OUT"
+echo "=== set at all stands the install down, whatever the spelling ==="
+# Whether the configured directory is in fact this repository's own would be
+# worked out here: resolved on disk, `..` folded on paper, a relative value
+# absolutized against the work tree. Each was another way to be subtly
+# wrong, and two of them were. Set is set: exit 0, a stated skip, nothing
+# written, no hand-wiring recipe, and no command to paste.
+fx_default_relative() { R="$(new_repo default-relative)"; set_value ".git/hooks"; }
+fx_default_absolute() { R="$(new_repo default-absolute)"; set_value "$R/.git/hooks"; }
+fx_elsewhere() { R="$(new_repo elsewhere)"; set_value "$R/otherhooks"; }
+run_rows \
+  "the default directory spelled relative|fx_default_relative||install||rc=0 $(skipped '.git/hooks' "$(block "$(local_origin '.git/hooks')")")|$NONE hooksPath='.git/hooks'" \
+  "the default directory spelled absolute|fx_default_absolute||install||rc=0 $(skipped '<repo>/.git/hooks' "$(block "$(local_origin '<repo>/.git/hooks')")")|$NONE hooksPath='<repo>/.git/hooks'" \
+  "a directory elsewhere|fx_elsewhere||install||rc=0 $(skipped '<repo>/otherhooks' "$(block "$(local_origin '<repo>/otherhooks')")")|$NONE hooksPath='<repo>/otherhooks'"
 
-echo "=== --check stands down the same way the install does ==="
+echo "=== --check stands down the same way, and claims nothing either way ==="
 # What a redirected directory does is a question about somebody else's
-# files, and answering it took a whole-file grammar over shell text —
-# reachability, which no reader settles. Every construct nobody had thought
-# of was another chance to report `armed` about a repository that gated
-# nothing. So the checker answers what the installer answers: not this
-# package's directory, not this package's verdict.
-R80="$(new_repo checkstanddown)"
-install_in "$R80"
-check_in "$R80"
-[ "$RC" -eq 0 ] && ok "the control: armed before any value is set" \
-  || bad "control not armed" "rc=$RC out=$OUT"
+# files; answering it took a whole-file grammar over shell text, and every
+# construct nobody had thought of was another chance to report armed about a
+# repository that gated nothing. The checker answers what the installer
+# answers: not this package's directory, not this package's verdict. The
+# cost is a directory wired by hand that really does gate, pinned here with
+# the commit that proves it gates.
+wired() { armed "$1"; wire_hooks_dir "$R" "$R/customhooks"; set_value customhooks; } # NAME
+fx_wired() { wired wired; }
+fx_wired_commit() { wired wired-commit; stage_marker; }
+fx_default_spelling() { armed default-spelling; set_value .git/hooks; }
+run_rows \
+  "a hand-wired directory is could-not-determine|fx_wired||check||rc=2 $(undetermined customhooks "$(block "$(local_origin customhooks)")")|helper=$OURS pre-commit=$SHIM_PRE commit-msg=$SHIM_MSG hooksPath='customhooks'" \
+  "and the wiring it will not judge really does gate|fx_wired_commit|$ONE|commit|feat: add b|rc=1 $BLOCKED|" \
+  "a value naming the default directory stands down too: git reads exactly the directory this package writes, and the verdict says nothing that spelling makes false|fx_default_spelling||check||rc=2 $(undetermined .git/hooks "$(block "$(local_origin .git/hooks)")")|"
 
-# Wired exactly as the retired stand-down message prescribed, and really
-# gating: this is the arming the change costs, so it is pinned as a cost.
-wire_hooks_dir "$R80" "$R80/customhooks"
-git -C "$R80" config core.hooksPath customhooks
-check_in "$R80"
-[ "$RC" -eq 2 ] && ok "a hand-wired core.hooksPath directory is 'could not determine'" \
-  || bad "hand-wired redirect checks 2" "rc=$RC out=$OUT"
-case "$OUT" in
-  *armed*) bad "the stand-down claims a verdict either way" "$OUT" ;;
-  *) ok "and it claims nothing about arming, in either direction" ;;
-esac
-case "$OUT" in
-  *"core.hooksPath is set (customhooks)"*) ok "and names the configured value" ;;
-  *) bad "the value is not named" "$OUT" ;;
-esac
-# Where git was sent is not measured, so it is not claimed: the same value
-# may name this repository's own hooks directory under another spelling.
-case "$OUT" in
-  *"sends git"* | *"redirect"*) bad "the verdict claims where git reads hooks from" "$OUT" ;;
-  *) ok "and claims nothing about where git reads hooks from" ;;
-esac
-case "$OUT" in
-  *"core.hooksPath is set."*) ok "and states that the value is set" ;;
-  *) bad "no stand-down statement" "$OUT" ;;
-esac
-# Recovery output is data, never a command line to paste
-# (the architecture decision on recovery output). The script cannot infer a command
-# that is correct for every repository configuration.
-case "$OUT" in
-  *"config --unset"* | *"--unset-all"* | *"git -C"*)
-    bad "a pasteable command came back in the stand-down" "$OUT" ;;
-  *) ok "and offers no command to paste" ;;
-esac
-case "$OUT" in
-  *"wire that directory"* | *"Have that directory's pre-commit run"*)
-    bad "a hand-wiring recipe is still prescribed" "$OUT" ;;
-  *) ok "and prescribes no hand-wiring" ;;
-esac
-
-# The verdict is honest only because such a repository really can be gated —
-# this one is, and the checker still declines to say so.
-printf '# %s: finish this\n' "$TD" >"$R80/sd.py"
-git -C "$R80" add sd.py
-commit_in "$R80" "feat: add sd"
-[ "$RC" -ne 0 ] && ok "and the wiring it will not judge really does gate" \
-  || bad "hand-wired directory blocks" "rc=$RC out=$OUT"
-git -C "$R80" rm -q --cached sd.py
-rm -f "$R80/sd.py"
-
-# The shims in .git/hooks are intact and git reads elsewhere. There is no
-# `dormant` verdict any more: whether commits are gated over there is
-# exactly the question this package stopped answering.
-mkdir -p "$R80/barehooks"
-git -C "$R80" config core.hooksPath barehooks
-check_in "$R80"
-[ "$RC" -eq 2 ] && ok "intact shims behind a redirect are 'could not determine' too" \
-  || bad "dormant redirect checks 2" "rc=$RC out=$OUT"
-case "$OUT" in
-  *dormant*) bad "a redirect is still called dormant" "$OUT" ;;
-  *) ok "and nothing is called dormant" ;;
-esac
-
-# A value naming the repository's own hooks directory is still a value. One
-# rule beats a taxonomy of spellings — resolving them is what kept being
-# subtly wrong.
-git -C "$R80" config core.hooksPath .git/hooks
-check_in "$R80"
-[ "$RC" -eq 2 ] && ok "a value naming the default hooks directory stands down too" \
-  || bad "default-spelling redirect checks 2" "rc=$RC out=$OUT"
-# And this is the case that makes "git is sent away from .git/hooks" a false
-# sentence: git reads hooks from exactly the directory this package writes.
-case "$OUT" in
-  *"away from"* | *"sends git"*) bad "the verdict claims git was sent elsewhere" "$OUT" ;;
-  *) ok "and the verdict says nothing that this spelling makes false" ;;
-esac
-
-# The must-fail control: unsetting it arms the same repository again, so the
-# pins above are not passing on a checker that answers 2 for everything.
-git -C "$R80" config --unset core.hooksPath
-check_in "$R80"
-[ "$RC" -eq 0 ] && ok "must-fail: unsetting the value arms the same repository again" \
-  || bad "unset re-arms" "rc=$RC out=$OUT"
-
-echo "=== the stand-down is a statement, git's report, and one sentence ==="
-# The architecture decision on recovery output: it presents its parameters as data,
-# never a command line to paste. Three prior shapes of this remedy each
-# composed a command and each was wrong about a configuration nobody here
-# can see. What is printed now is git's own report, unedited, and a sentence
-# naming no path and no command.
-R90="$(new_repo origin-listing)"
-install_in "$R90"
-git config --global core.hooksPath "$R90/globalhooks"
-[ -z "$(git -C "$R90" config --local --get core.hooksPath || true)" ] \
-  && ok "the control: the value is global only, with nothing local" \
-  || bad "the fixture set a local value too" "$(git -C "$R90" config --local --get core.hooksPath || true)"
-
-check_in "$R90"
-[ "$RC" -eq 2 ] && ok "a global core.hooksPath stands the checker down" \
-  || bad "global hooksPath checks 2" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"core.hooksPath is set."*) ok "and states that the value is set" ;;
-  *) bad "no stand-down statement" "$OUT" ;;
-esac
-# git's own words, unedited: the scope and the origin as git spells them.
-case "$OUT" in
-  *global*"$HOME/.gitconfig"*) ok "and git's report of the origin reaches the reader as git wrote it" ;;
-  *) bad "git's report is not there" "$OUT" ;;
-esac
-case "$OUT" in
-  *"Clear the setting at its source, then run kendex guard install."*)
-    ok "and closes with one sentence naming no path and no command" ;;
-  *) bad "the closing sentence is missing" "$OUT" ;;
-esac
-# The rule, as a pin: nothing pasteable, and no path of this file's own.
-case "$OUT" in
-  *"config --unset"* | *"--unset-all"* | *"git -C"*)
-    bad "a pasteable command came back" "$OUT" ;;
-  *) ok "and offers no command to paste" ;;
-esac
-
-# The install lane prints the same block, from the same function.
-install_in "$R90"
-case "$OUT" in
-  *"core.hooksPath is set."*"Clear the setting at its source, then run kendex guard install."*)
-    ok "and the install lane prints the same block" ;;
-  *) bad "install printed something else" "$OUT" ;;
-esac
-git config --global --unset-all core.hooksPath
-
-echo "=== an included file is reported as git reports it ==="
-# The case that makes a composed unset wrong even with the scope right:
-# include.path pulls the key in from another file, and git names that file
-# under the INCLUDING scope. Nothing here has to know that — git says it.
-R91="$(new_repo included-origin)"
-install_in "$R91"
-printf '[core]\n\thooksPath = %s/includedhooks\n' "$R91" >"$R91/extra.cfg"
-git -C "$R91" config include.path "$R91/extra.cfg"
-[ "$(git -C "$R91" config --get core.hooksPath)" = "$R91/includedhooks" ] \
-  && ok "the control: the value really does come from the included file" \
-  || bad "the include did not supply the value" "$(git -C "$R91" config --get core.hooksPath || true)"
-
-check_in "$R91"
-[ "$RC" -eq 2 ] && ok "an included core.hooksPath stands the checker down" \
-  || bad "included hooksPath checks 2" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"$R91/extra.cfg"*) ok "and git's report names the included file itself" ;;
-  *) bad "the included file is not named" "$OUT" ;;
-esac
-# The must-fail control for the whole design: unsetting only what the scope
-# names leaves the value in force, which is why no scoped command is offered.
-git -C "$R91" config --local --unset-all core.hooksPath 2>/dev/null || true
-[ "$(git -C "$R91" config --get core.hooksPath || true)" = "$R91/includedhooks" ] \
-  && ok "must-fail: a scoped local unset leaves the included value in force" \
-  || bad "the scoped unset cleared the included value" "$(git -C "$R91" config --get core.hooksPath || true)"
-
-echo "=== an origin that is not a file is reported as that ==="
-# git answers `command line:` for a value carried in the environment or on
-# the command line. There is no file to clear and nothing here claims there
-# is: git's word for it goes through unedited.
-R92="$(new_repo command-origin)"
-install_in "$R92"
-OUT=""; RC=0
-OUT="$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$R92/envhooks" \
-  "$R92/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R92" --check 2>&1)" || RC=$?
-[ "$RC" -eq 2 ] && ok "a command-line core.hooksPath stands the checker down" \
-  || bad "command-line hooksPath checks 2" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"command line:"*) ok "and git's report says command line, not a file" ;;
-  *) bad "the command-line origin is not reported" "$OUT" ;;
-esac
-case "$OUT" in
-  *file:*) bad "an origin that is not a file was reported as one" "$OUT" ;;
-  *) ok "and nothing calls that origin a file" ;;
-esac
+echo "=== git's report of where the value is set reaches the reader as git wrote it ==="
+# The architecture decision on recovery output: parameters as data, never a
+# command line to paste. Three prior shapes of this remedy each composed a
+# command and each was wrong about a configuration nobody here can see:
+# include.path pulls the key in from another file that git names under the
+# INCLUDING scope, and a value carried in the environment has no file at
+# all. What is printed is git's own line, unedited.
+fx_global() { armed global; git config --global core.hooksPath "$R/globalhooks"; UNDO="git config --global --unset-all core.hooksPath"; }
+fx_global_install() { armed global-install; git config --global core.hooksPath "$R/globalhooks"; UNDO="git config --global --unset-all core.hooksPath"; }
+fx_included() { armed included; printf '[core]\n\thooksPath = %s/includedhooks\n' "$R" >"$R/extra.cfg"; git -C "$R" config include.path "$R/extra.cfg"; }
+fx_command_line() { armed command-line; }
+GLOBAL_ORIGIN="  \$'global\\tfile:<root>/home/.gitconfig\\t<repo>/globalhooks'"
+INCLUDED_ORIGIN="  \$'local\\tfile:<repo>/extra.cfg\\t<repo>/includedhooks'"
+COMMAND_ORIGIN="  \$'command\\tcommand line:\\t<repo>/envhooks'"
+run_rows \
+  "a global value: the scope and the origin as git spells them|fx_global||check||rc=2 $(undetermined '<repo>/globalhooks' "$(block "$GLOBAL_ORIGIN")")|" \
+  "and the install lane prints the same block|fx_global_install||install||rc=0 $(skipped '<repo>/globalhooks' "$(block "$GLOBAL_ORIGIN")")|helper=$OURS pre-commit=$SHIM_PRE commit-msg=$SHIM_MSG hooksPath='<repo>/globalhooks'" \
+  "an included file is named under the including scope, as git names it|fx_included||check||rc=2 $(undetermined '<repo>/includedhooks' "$(block "$INCLUDED_ORIGIN")")|" \
+  "a value from the environment is reported as the command line, not a file|fx_command_line|GIT_CONFIG_COUNT=1,GIT_CONFIG_KEY_0=core.hooksPath,GIT_CONFIG_VALUE_0=$TMP/command-line/envhooks|check||rc=2 $(undetermined '<repo>/envhooks' "$(block "$COMMAND_ORIGIN")")|"
 
 echo "=== a report git will not produce is said to be missing ==="
 # The verdict does not depend on the listing: a git that cannot produce it
 # still stands the checker down, and the text says the origin is missing
-# rather than inventing one.
-R93="$(new_repo origin-unlistable)"
-install_in "$R93"
-git -C "$R93" config core.hooksPath "$R93/somehooks"
-mkdir -p "$TMP/gitshim"
-REAL_GIT="$(command -v git)"
-printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = "--show-origin" ] && exit 1; done\nexec %s "$@"\n' "$REAL_GIT" >"$TMP/gitshim/git"
-chmod +x "$TMP/gitshim/git"
-OUT=""; RC=0
-OUT="$(PATH="$TMP/gitshim:$PATH" "$R93/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R93" --check 2>&1)" || RC=$?
-[ "$RC" -eq 2 ] && ok "the verdict is unchanged when the origin cannot be listed" \
-  || bad "unlistable origin changed the verdict" "rc=$RC out=$OUT"
-case "$OUT" in
-  *"Its origin could not be listed."*) ok "and it says the origin could not be listed" ;;
-  *) bad "the missing listing is not stated" "$OUT" ;;
-esac
-case "$OUT" in
-  *"Clear the setting at its source, then run kendex guard install."*)
-    ok "and still closes with the same sentence" ;;
-  *) bad "the closing sentence is missing" "$OUT" ;;
-esac
-# The must-fail control: the same shim with a working --show-origin reports
-# an origin, so the case above is the shim's refusal and not a dead branch.
-OUT=""; RC=0
-OUT="$("$R93/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R93" --check 2>&1)" || RC=$?
-case "$OUT" in
-  *"Its origin could not be listed."*) bad "must-fail: a working git still reported no origin" "$OUT" ;;
-  *file:*) ok "must-fail: the same repository with a working git reports an origin" ;;
-  *) bad "no origin from a working git" "$OUT" ;;
-esac
+# rather than inventing one. The shim refuses --show-origin and passes
+# everything else through, so the same repository under the real git is the
+# control that reports an origin (the elsewhere rows above).
+fx_unlistable() {
+  armed unlistable
+  set_value "$R/somehooks"
+  mkdir -p "$TMP/gitshim"
+  printf '#!/bin/sh\nfor a in "$@"; do [ "$a" = "--show-origin" ] && exit 1; done\nexec %s "$@"\n' "$(command -v git)" >"$TMP/gitshim/git"
+  chmod +x "$TMP/gitshim/git"
+}
+run_rows \
+  "an unlistable origin changes the text, never the verdict|fx_unlistable|PATH=$TMP/gitshim:$PATH|check||rc=2 $(undetermined '<repo>/somehooks' "$SET_LINE;$UNLISTED;$CLEAR")|"
 
-echo "=== the repository's own path cannot break the summary either ==="
-# The repository path reaches the same one-line summary the configured
-# value does, and carries the same class of bytes: a path holding a newline
-# ends that line early, and one holding ESC hands the terminal control codes
-# — from the name of the directory being reported.
-# $'\n' rather than a capture: $(...) strips the newline, which would leave
-# this fixture testing an ordinary path — the very class being pinned.
+# A configuration git cannot read has no row: lib/paths.sh's gg_path returns 1
+# for every failure, so classify_hooks_path never sees the 128 a broken
+# .git/config exits with and its could-not-read branch is unreachable
+# (recorded in the audit, not pinned as the contract).
+
+echo "=== the repository's own path cannot break the one-line summary ==="
+# The repository path reaches the same one-line summary the configured value
+# does, and carries the same class of bytes: a newline would end the line
+# early and ESC would hand the terminal control codes, from the name of the
+# directory being reported. Rendered by %q, both survive as escapes.
 NL=$'\n'
 ESCB=$'\033'
-WILD="$TMP/re${NL}po${ESCB}x"
-mkdir -p "$WILD/.agents/skills"
-git -C "$WILD" -c init.defaultBranch=main init -q
-git -C "$WILD" config user.email test@example.com
-git -C "$WILD" config user.name test
-cp -R "$SKILL_DIR" "$WILD/.agents/skills/commit-guards"
-ln -s "$SKILL_DIR/../doc-limits" "$WILD/.agents/skills/doc-limits"
-[ -d "$WILD/.git" ] && ok "the control: a repository really does live at a newline-and-ESC path" \
-  || bad "the wild-path repository was not created" ""
-
-SUMMARY=""; RC=0
-SUMMARY="$("$WILD/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$WILD" 2>/dev/null)" || RC=$?
-[ "$RC" -eq 0 ] && ok "an install under that path succeeds" \
-  || bad "install under a wild path" "rc=$RC out=$SUMMARY"
-[ "$(printf '%s' "$SUMMARY" | wc -l)" -eq 0 ] \
-  && ok "and its summary is one line, though the path it names is two" \
-  || bad "the install summary broke into several lines" "$(printf '%s' "$SUMMARY" | cat -v)"
-
-# The armed verdict names the hooks directory, so it carries the path too.
-SUMMARY=""; RC=0
-SUMMARY="$("$WILD/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$WILD" --check 2>/dev/null)" || RC=$?
-[ "$RC" -eq 0 ] && ok "the check reports it armed" || bad "wild-path check armed" "rc=$RC out=$SUMMARY"
-[ "$(printf '%s' "$SUMMARY" | wc -l)" -eq 0 ] \
-  && ok "and that verdict is one line as well" \
-  || bad "the armed verdict broke into several lines" "$(printf '%s' "$SUMMARY" | cat -v)"
-case "$SUMMARY" in
-  *"$ESCB"*) bad "a raw ESC byte from the repository path reached the summary" "$(printf '%s' "$SUMMARY" | cat -v)" ;;
-  *) ok "and no raw ESC byte from the path reaches the reader" ;;
-esac
-
-# The drifted lane folds its reasons into that same line, and those name the
-# directory as well.
-rm -f "$WILD/.git/hooks/pre-commit"
-SUMMARY=""; RC=0
-SUMMARY="$("$WILD/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$WILD" --check 2>/dev/null)" || RC=$?
-[ "$RC" -eq 1 ] && ok "a drifted install under that path checks 1" \
-  || bad "wild-path drift checks 1" "rc=$RC out=$SUMMARY"
-[ "$(printf '%s' "$SUMMARY" | wc -l)" -eq 0 ] \
-  && ok "and the drift verdict is one line too" \
-  || bad "the drift verdict broke into several lines" "$(printf '%s' "$SUMMARY" | cat -v)"
-case "$SUMMARY" in
-  *"pre-commit is missing"*) ok "and it still says what drifted" ;;
-  *) bad "the reason did not survive on the line" "$(printf '%s' "$SUMMARY" | cat -v)" ;;
-esac
-
-# The must-fail control: the path really does span two lines, so the pins
-# above are not passing on a directory name with nothing to lose.
-[ "$(printf '%s' "$WILD" | wc -l)" -eq 1 ] \
-  && ok "must-fail: the repository path itself spans two lines" \
-  || bad "the wild path is one line after all" "$(printf '%s' "$WILD" | cat -v)"
+wild() { # NAME — a repository at a path holding a newline and ESC
+  R="$TMP/$1${NL}po${ESCB}x"
+  mkdir -p "$R/.agents/skills"
+  git -C "$R" -c init.defaultBranch=main init -q
+  git -C "$R" config user.email test@example.com
+  git -C "$R" config user.name test
+  cp -R "$GG_SKILL_TEMPLATE" "$R/.agents/skills/commit-guards"
+  ln -s "$SKILL_DIR/../doc-limits" "$R/.agents/skills/doc-limits"
+  assert_eq "fixture: the path spans two lines" "1" "$(printf '%s' "$R" | wc -l | tr -d ' ')"
+}
+wild_armed() { wild "$1"; "$R/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true; }
+fx_wild_install() { wild wild-install; }
+fx_wild_check() { wild_armed wild-check; }
+fx_wild_drift() { wild_armed wild-drift; rm "$R/.git/hooks/pre-commit"; }
+wild_hooks() { printf "\$'<root>/%s\\\\npo\\\\Ex/.git/hooks'" "$1"; } # NAME -> the hooks directory as %q renders it
+run_rows \
+  "an install under that path reports one line, the path escaped|fx_wild_install||install||rc=0 commit-guards git hooks: pre-commit and commit-msg armed in $(wild_hooks wild-install)|" \
+  "the armed verdict is one line as well|fx_wild_check||check||rc=0 commit-guards git hooks: armed — pre-commit and commit-msg gate commits in $(wild_hooks wild-check)|" \
+  "the drift verdict folds its reason into that one line|fx_wild_drift||check||rc=1 commit-guards git hooks: NOT armed — pre-commit is missing ($(wild_hooks wild-drift)); run 'kendex guard install' (or this installer) to re-arm|"
 
 echo "=== a repository path that begins with a dash is a path ==="
 # `cd "$REPO"` reads a leading dash as an option: `--repo -P` became `cd -P`,
-# which succeeds in the WRONG directory rather than failing. `--` ends the
-# option list, and a directory named `-P` is a directory somebody can make.
-DASHED="$TMP/-P"
-mkdir -p "$DASHED/.agents/skills"
-git -C "$DASHED" init -q
-git -C "$DASHED" config user.email t@t
-git -C "$DASHED" config user.name t
-cp -R "$SKILL_DIR" "$DASHED/.agents/skills/commit-guards"
-OUT=""; RC=0
-OUT="$(cd "$TMP" && "$DASHED/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "-P" 2>&1)" || RC=$?
-[ "$RC" -eq 0 ] && ok "an install under a dash-named repository succeeds" \
-  || bad "dash-named repo install" "rc=$RC out=$OUT"
-[ -x "$DASHED/.git/hooks/kendex-guards" ] \
-  && ok "and the shims land in that repository, not the caller's directory" \
-  || bad "shims did not land in the dash-named repo" "out=$OUT"
+# which succeeds in the WRONG directory rather than failing. Run from the
+# parent with the relative name, which the table's absolute --repo cannot
+# spell, so this one sits beside it.
+R="$TMP/-P"
+mkdir -p "$R/.agents/skills"
+git -C "$R" init -q
+git -C "$R" config user.email test@example.com
+git -C "$R" config user.name test
+cp -R "$GG_SKILL_TEMPLATE" "$R/.agents/skills/commit-guards"
+R_PHYS="$(cd -- "$R" && pwd -P)"
+DASH_RC=0
+DASH_OUT="$(cd "$TMP" && "$R/.agents/skills/commit-guards/scripts/install-git-hooks" --repo -P 2>&1)" || DASH_RC=$?
+assert_eq "an install named by a dash-led relative path arms that repository" "rc=0 $ARMED" "rc=$DASH_RC $(aliased "$DASH_OUT")"
+assert_eq "and the shims land there, not in the caller's directory" "$FRESH" "$(state)"
+
+assert_eq "every seeded fixture landed its seed commit" "" "$SEEDS_FAILED"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
