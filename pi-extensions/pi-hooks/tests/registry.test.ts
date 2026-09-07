@@ -588,7 +588,7 @@ describe("pi-hooks registry dispatch on the listeners Pi gives no verdict to", (
 	 */
 	test("a hook that reached no verdict says so on the tool result", async () => {
 		const project = initCleanRustRepo("pi-hooks-no-verdict-");
-		writePiConfig(project, { hookTimeoutMs: 400 });
+		writePiConfig(project);
 		const log = join(project, "no-verdict.log");
 		const root = join(project, ".pi");
 		try {
@@ -596,7 +596,7 @@ describe("pi-hooks registry dispatch on the listeners Pi gives no verdict to", (
 			// behind it; then one that outlives the budget; then one that
 			// exits 1.
 			registerRendered(root, TOOL_RESULT_LISTENER, undefined, projectCommand(".pi/kendex/hooks/audit.sh"));
-			registerRendered(root, TOOL_RESULT_LISTENER, undefined, "sleep 30");
+			registerRendered(root, TOOL_RESULT_LISTENER, undefined, "sleep 30", 1);
 			registerRendered(root, TOOL_RESULT_LISTENER, undefined, customCommand(log, "audit: it fell over", 1));
 
 			const onToolResult = installCarrier().handler(TOOL_RESULT_LISTENER);
@@ -607,7 +607,7 @@ describe("pi-hooks registry dispatch on the listeners Pi gives no verdict to", (
 			expect(said).toContain("rendered script is missing");
 			expect(said).toContain("kendex refresh");
 			expect(said).not.toContain("No such file or directory");
-			expect(said).toContain("timed out after 400ms");
+			expect(said).toContain("timed out after 1000ms");
 			expect(said).toContain("exited 1 without reaching a verdict: audit: it fell over");
 		} finally {
 			rmSync(project, { recursive: true, force: true });
