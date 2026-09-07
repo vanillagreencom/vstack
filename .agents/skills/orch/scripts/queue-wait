@@ -32,7 +32,7 @@ queue" from "never entered it"; this script can. It is NOT a CI waiter:
 ci-wait owns check state and approval-wait owns the review gate.
 
   <PR#>          pull request number (required)
-  poll_interval  seconds between polls (default 180, the floor: the GitHub API budget is shared by every lane)
+  poll_interval  seconds between polls (default 180; do not go lower, the GitHub API budget is shared by every lane)
   max_wait       total budget in seconds, an upper bound (default 2400 —
                  40 min, sized to measured merge-group suites up to
                  ~25 min); poll_interval must be <= max_wait

@@ -56,7 +56,7 @@ PR_REVIEW_CHECK = ""
 PR_REVIEW_ON_TIMEOUT = "proceed"
 
 # Command text the command-safety hook refuses before the shell runs, where
-# the command-safety bundle is installed: a systemd-run scope capped by
+# the command-safety bundle is installed: a systemd-run invocation capped by
 # MemoryMax= or MemoryHigh= with a K- or M-suffixed value. A memory-starved
 # cgroup fails a kernel allocation inside a btrfs transaction and the host's
 # root volume goes read-only. Remedy: run the reproduction as a plain process
@@ -64,8 +64,9 @@ PR_REVIEW_ON_TIMEOUT = "proceed"
 COMMAND_SAFETY_DENY_PATTERN = "(^|[^[:alnum:]_-])systemd-run[[:space:]][^;|&]*Memory(Max|High)=[0-9]+[KkMm]([^[:alnum:]]|$)"
 
 # Seconds ci-wait keeps polling before failing when no CI checks registered
-# yet; raise for approval-gated CI with slow dispatch.
-CI_WAIT_NO_CHECKS_GRACE = "180"
+# yet, four polls at its 180 s default interval; raise for approval-gated CI
+# with slow dispatch.
+CI_WAIT_NO_CHECKS_GRACE = "600"
 
 # Max automated ci-fix rounds per PR before a human takes over.
 CI_FIX_MAX_CYCLES = "6"

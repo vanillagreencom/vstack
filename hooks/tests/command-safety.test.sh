@@ -13,10 +13,11 @@ cp -R "$ROOT/skills/commit-guards/scripts/lib" "$repo/.agents/skills/commit-guar
 hook="$repo/.claude/hooks/command-safety.sh"
 unset COMMAND_SAFETY_DENY_PATTERN COMMIT_GUARDS_SETTINGS_FILE
 
-settings() {
+settings() { # [SOURCE_FILE]: the file whose one COMMAND_SAFETY_DENY_PATTERN line becomes the policy
+  local source="${1:-$ROOT/docs/authoring/command-safety.md}"
   printf '[env]\n' >"$repo/kendex.settings.toml"
-  awk '/^COMMAND_SAFETY_DENY_PATTERN = / { print; found++ } END { if (found != 1) exit 1 }' \
-    "$ROOT/docs/authoring/command-safety.md" >>"$repo/kendex.settings.toml"
+  awk '/^COMMAND_SAFETY_DENY_PATTERN = / { print; found++ } END { if (found != 1) { printf "%s: expected one COMMAND_SAFETY_DENY_PATTERN line, found %d\n", FILENAME, found > "/dev/stderr"; exit 1 } }' \
+    "$source" >>"$repo/kendex.settings.toml"
 }
 settings
 passed=0
@@ -42,12 +43,7 @@ check 0 'scripts/validate qml' 'isolated validation'
 check 0 'git status' 'unrelated shell command'
 check 0 'qs -c test-fixture' 'a different configured shell'
 
-project_settings() { # this repository's own policy, kendex.settings.toml
-  printf '[env]\n' >"$repo/kendex.settings.toml"
-  awk '/^COMMAND_SAFETY_DENY_PATTERN = / { print; found++ } END { if (found != 1) exit 1 }' \
-    "$ROOT/kendex.settings.toml" >>"$repo/kendex.settings.toml"
-}
-project_settings
+settings "$ROOT/kendex.settings.toml"
 while IFS='|' read -r expected command label; do
   check "$expected" "$command" "$label"
 done <<'ROWS'
