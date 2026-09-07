@@ -359,6 +359,7 @@ fn update(env: &Env, plans: &[ScopePlan]) -> CliResult {
         }
         kendex_core::drift::snapshot::record(env, &plan.scope)?;
     }
+    offer_to_commit(env, plans)?;
     if failures.is_empty() {
         say(&match updated {
             0 => "all pi packages up to date".to_owned(),
@@ -367,6 +368,32 @@ fn update(env: &Env, plans: &[ScopePlan]) -> CliResult {
         return Ok(());
     }
     Err(format!("update failed for: {}", failures.join(", ")).into())
+}
+
+/// The commit offer, made here because this verb writes into a project's
+/// `.pi` directory without going through a plan, and so is not reached by
+/// the seam in `engine_common::apply_report` that every other verb writes
+/// through.
+///
+/// The paths the offer covers are the ones the engine renders in that
+/// project, which only a plan names — so one is derived here for that
+/// alone. A scope whose plan will not derive gets no offer: the writes
+/// above still stand, and nothing about them is claimed.
+fn offer_to_commit(env: &Env, plans: &[ScopePlan]) -> CliResult {
+    for plan in plans {
+        if !matches!(plan.scope, Scope::Project { .. }) {
+            continue;
+        }
+        let Ok(report) = kendex_core::engine::plan_apply(
+            env,
+            &plan.scope,
+            &kendex_core::engine::PlanOptions::default(),
+        ) else {
+            continue;
+        };
+        super::commit_offer::after_writing(env, &plan.scope, &report.generated)?;
+    }
+    Ok(())
 }
 
 fn record_pi_installs(env: &Env, plan: &ScopePlan, completed: Option<&str>) -> CliResult {

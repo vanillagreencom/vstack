@@ -11,13 +11,34 @@ pub enum SourceCommand {
     /// List declared sources for the scope
     List,
     /// Declare a source: `owner/repo[@rev]`, a git URL, or a local path
-    Add { name: String, reference: String },
+    Add {
+        name: String,
+        reference: String,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
+    },
     /// Remove a source (blocked while items still reference it)
-    Remove { name: String },
+    Remove {
+        name: String,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
+    },
     /// Re-enable a source and restore its installations
-    Enable { name: String },
+    Enable {
+        name: String,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
+    },
     /// Disable a source; its installations deactivate but stay declared
-    Disable { name: String },
+    Disable {
+        name: String,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
+    },
     /// Re-resolve remote source caches
     Refresh {
         /// Only fetch mirrors whose freshness stamp is old, then re-derive
@@ -57,7 +78,9 @@ pub fn run(env: &Env, command: SourceCommand, filter: ScopeFilter) -> CliResult 
                     ));
                 }
             }
-            SourceCommand::Add { name, reference } => {
+            SourceCommand::Add {
+                name, reference, ..
+            } => {
                 let report = source_ops::add_source(env, &scope, name, reference)?;
                 apply_report(env, &report)?;
                 say(&format!(
@@ -65,12 +88,12 @@ pub fn run(env: &Env, command: SourceCommand, filter: ScopeFilter) -> CliResult 
                     scope_label(&scope)
                 ));
             }
-            SourceCommand::Remove { name } => {
+            SourceCommand::Remove { name, .. } => {
                 let report = source_ops::remove_source(env, &scope, name)?;
                 apply_report(env, &report)?;
                 say(&format!("{}: removed source '{name}'", scope_label(&scope)));
             }
-            SourceCommand::Enable { name } | SourceCommand::Disable { name } => {
+            SourceCommand::Enable { name, .. } | SourceCommand::Disable { name, .. } => {
                 let enabled = matches!(command, SourceCommand::Enable { .. });
                 let report = source_ops::toggle_source(env, &scope, name, enabled)?;
                 apply_report(env, &report)?;

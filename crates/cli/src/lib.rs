@@ -13,6 +13,7 @@ use kendex_core::env::Env;
 use kendex_core::install_channel::{Host, HostProbe};
 use kendex_core::legal;
 
+use commands::commit_offer::CommitFlags;
 use commands::project::ProjectCommand;
 use flags::{AddFlags, ReportFlags};
 use scope::ScopeFilter;
@@ -28,6 +29,9 @@ struct Cli {
     source: Option<String>,
     #[command(flatten)]
     add_flags: AddFlags,
+    /// The commit offer's answer for the bare form, which is `add`
+    #[command(flatten)]
+    _commit: CommitFlags,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -40,6 +44,9 @@ enum Command {
         source: Option<String>,
         #[command(flatten)]
         flags: AddFlags,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
     },
     /// What changed between two versions of a package
     Diff(commands::diff_cmd::DiffArgs),
@@ -70,6 +77,9 @@ enum Command {
         /// Take the files away and leave kendex.toml untouched; refresh installs what it declares again
         #[arg(long, conflicts_with_all = ["sweep", "no_sweep"])]
         keep_declaration: bool,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
     },
     /// Regenerate every declared installation from its source, and the instruction shims
     Refresh(commands::refresh::RefreshArgs),
@@ -100,6 +110,9 @@ enum Command {
         /// project | global (default project)
         #[arg(long)]
         scope: Option<String>,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
     },
     /// Register, list, and discover kendex-enabled projects
     #[command(subcommand)]
@@ -149,6 +162,9 @@ enum Command {
         /// Skip confirmation prompts
         #[arg(short = 'y', long)]
         yes: bool,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
     },
     /// Commit-time quality guards and the git hooks that run them
     #[command(subcommand)]
@@ -200,6 +216,9 @@ enum Command {
         /// project | global | all (default all)
         #[arg(long)]
         scope: Option<String>,
+        /// The commit offer's answer, without asking
+        #[command(flatten)]
+        _commit: crate::commands::commit_offer::CommitFlags,
     },
 }
 
@@ -216,13 +235,35 @@ pub fn main() -> ExitCode {
         bootstrap_the_command_record(&env);
         announce_the_terms_on_first_run(&env);
     }
-    let cli = Cli::parse();
+    let matches = <Cli as clap::CommandFactory>::command().get_matches();
+    let cli = match <Cli as clap::FromArgMatches>::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        Err(error) => error.exit(),
+    };
+    // What the person typed, for the commit offer's default message, and
+    // the flag they answered it with. Both read off clap's own resolution
+    // rather than enumerated here, so no list of verbs can fall out of
+    // date as the command surface changes.
+    commands::commit_offer::begin(&typed(&matches), CommitFlags::from_matches(&matches));
     // The machine check's whole contract is its exit code: 1 means "drift,
     // report on stdout". A failure before the check could run — settings
     // unreadable, scope unresolvable — must exit 2 (could not check), or
     // the session hook reads the empty report as a clean machine.
     let machine_check = matches!(&cli.command, Some(Command::Check { catalog: None, .. }));
     match run(cli) {
+        // A Ctrl-C at the commit offer let the verb finish closing its
+        // scopes; the run still ends as a cancel.
+        Ok(_) if commands::commit_offer::cancelled() => {
+            ui::outro_fail("cancelled");
+            ExitCode::from(130)
+        }
+        // A refused commit, push or pull request: the block carried the
+        // program's own words and the way on, and the ledger named it, so
+        // the exit adds nothing.
+        Ok(_) if commands::commit_offer::refused() => {
+            ui::finish();
+            ExitCode::FAILURE
+        }
         Ok(code) => {
             ui::finish();
             code
@@ -339,6 +380,25 @@ fn announce_the_terms_on_first_run(env: &Env) {
     let _ = legal::accept(env);
 }
 
+/// The command the person typed, without its flags and arguments: the
+/// subcommand path clap resolved, joined by spaces, so a group and its
+/// subcommand are named together.
+///
+/// The bare form has no subcommand and maps to `add`, which is the command
+/// it runs and the one a person could type to run it again.
+fn typed(matches: &clap::ArgMatches) -> String {
+    let mut names: Vec<&str> = Vec::new();
+    let mut at = matches;
+    while let Some((name, inner)) = at.subcommand() {
+        names.push(name);
+        at = inner;
+    }
+    match names.is_empty() {
+        true => "add".to_owned(),
+        false => names.join(" "),
+    }
+}
+
 /// The bare form: `kendex <source> [flags]` maps to `add`.
 fn bare_add(
     env: &Env,
@@ -358,7 +418,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
         return bare_add(&env, cli.source, cli.add_flags);
     };
     match command {
-        Command::Add { source, flags } => commands::add::run(&env, flags.into_args(source))?,
+        Command::Add { source, flags, .. } => commands::add::run(&env, flags.into_args(source))?,
         Command::Login => commands::login::login()?,
         Command::Logout => commands::login::logout()?,
         Command::Diff(args) => commands::diff_cmd::run(&env, args)?,
@@ -374,6 +434,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             sweep,
             no_sweep,
             keep_declaration,
+            ..
         } => remove(
             &env,
             names,
@@ -399,6 +460,7 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             harness,
             global,
             scope,
+            ..
         } => {
             let filter = ScopeFilter::resolve(scope.as_deref(), global, ScopeFilter::Project)?;
             commands::adopt::run(&env, kind, name, harness, filter)?;
@@ -420,11 +482,13 @@ fn run(cli: Cli) -> Result<ExitCode, Box<dyn std::error::Error>> {
             catalog,
             strict,
         } => return check(&env, global, scope, json, quiet, catalog, strict),
-        Command::DriftHook { global, scope, yes } => {
+        Command::DriftHook {
+            global, scope, yes, ..
+        } => {
             let filter = ScopeFilter::resolve(scope.as_deref(), global, ScopeFilter::Project)?;
             commands::drift_hook::run(&env, filter, yes)?;
         }
-        Command::UpdatePi { check, scope } => {
+        Command::UpdatePi { check, scope, .. } => {
             let filter = ScopeFilter::resolve(scope.as_deref(), false, ScopeFilter::All)?;
             commands::update_pi::run(&env, filter, check)?;
         }

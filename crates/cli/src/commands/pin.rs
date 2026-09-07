@@ -25,6 +25,9 @@ pub struct PinArgs {
     /// Skip confirmation prompts
     #[arg(short = 'y', long)]
     yes: bool,
+    /// The commit offer's answer, without asking
+    #[command(flatten)]
+    _commit: crate::commands::commit_offer::CommitFlags,
 }
 
 /// The kinds a user can name on the command line. Plugins declare through

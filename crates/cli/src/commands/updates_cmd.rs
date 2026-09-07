@@ -40,6 +40,9 @@ pub struct UpdatesArgs {
     /// Skip confirmation prompts
     #[arg(short = 'y', long, global = true)]
     yes: bool,
+    /// The commit offer's answer, without asking
+    #[command(flatten)]
+    _commit: crate::commands::commit_offer::CommitFlags,
 }
 
 pub fn run(env: &Env, args: UpdatesArgs) -> CliResult {
@@ -50,6 +53,7 @@ pub fn run(env: &Env, args: UpdatesArgs) -> CliResult {
         global,
         scope,
         yes,
+        ..
     } = args;
     let filter = ScopeFilter::resolve(scope.as_deref(), global, ScopeFilter::Project)?;
     let scope = resolve_scopes(env, filter)?.remove(0);

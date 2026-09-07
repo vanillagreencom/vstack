@@ -24,7 +24,7 @@ import {
   UPDATES_ONE_AT_A_TIME_NOTE,
 } from "@/lib/copy-updates";
 import type { ReadState } from "@/lib/read-state";
-import { rescanEverything } from "@/lib/rescan";
+import { offerToCommit, rescanEverything, trackedProjects } from "@/lib/rescan";
 import { sameScope } from "@/lib/scope";
 import { settled } from "@/lib/settled";
 import { saying } from "@/lib/undone";
@@ -174,6 +174,7 @@ export function followSwitch({
         // the scan lists and the audit scores. Asked whatever the write
         // answered and whichever way the switch went, on that same rule.
         await rescanEverything();
+        void offerToCommit(trackedProjects());
       }
     });
   };

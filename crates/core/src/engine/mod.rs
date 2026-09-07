@@ -29,7 +29,8 @@ mod expansion;
 mod file_plan;
 pub mod fork;
 mod gemini;
-mod generated_paths;
+pub mod generated_paths;
+pub use generated_paths::GeneratedPaths;
 mod holds;
 mod installed;
 mod recovery;
@@ -221,11 +222,10 @@ pub fn plan_scope(
     let repo_effects_leaving = repo_effects::leaving(env, scope, lock, &new_lock)?;
     plan_lock_write(env, scope, declared, disk_lock, new_lock, &mut ops)?;
     scope_notes.extend(scope_wide(scope, &mut ops)?);
-    generated_paths::plan(scope, &state, &instruction_shims, &drift, &mut ops)?;
+    let generated = generated_paths::plan(scope, &state, &instruction_shims, &drift, &mut ops)?;
 
-    let declaration_status = DeclarationStatus::of(&state);
     let mut report = EngineReport {
-        declaration_status,
+        declaration_status: DeclarationStatus::of(&state),
         // Ahead of the moves out of `state` below, and read before `drift`
         // moves in: an effect belongs to a package this pass adds to what
         // the scope carries, and to no other.
@@ -241,6 +241,7 @@ pub fn plan_scope(
         safety,
         instruction_shims,
         fork_edits,
+        generated,
     };
     report.notes.extend(scope_notes);
     unmanaged_rows(env, scope, &manifest, lock, &state.items, &mut report.drift)?;
@@ -355,6 +356,7 @@ pub fn plan_apply(env: &Env, scope: &Scope, options: &PlanOptions) -> Result<Eng
         repo_effects_leaving: Vec::new(),
         instruction_shims: Vec::new(),
         fork_edits: Vec::new(),
+        generated: GeneratedPaths::default(),
     };
     let empty = Manifest::default();
     unmanaged_rows(env, scope, &empty, &lock, &[], &mut report.drift)?;

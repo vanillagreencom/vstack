@@ -40,8 +40,11 @@ export function ProjectCard({
   onOpen: () => void;
   onKindClick: (kind: ItemKind) => void;
   emptyLabel: string;
-  /** A state worth flagging beside the name, e.g. a missing folder. */
-  badge?: string;
+  /** A state worth flagging beside the name, with the reason behind it on
+   *  hover. A missing folder is a fault and draws as one; files kendex
+   *  wrote and could not offer to commit are not, so the variant travels
+   *  with the text rather than being fixed here. */
+  badge?: { text: string; variant: "destructive" | "info"; title?: string };
   action?: ReactNode;
   /** How many items here kendex was never asked to look after. Zero says
    *  nothing: this is the one place the app mentions them, and a card
@@ -65,7 +68,11 @@ export function ProjectCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <ShowEverythingButton name={name} path={path} onOpen={onOpen} />
-            {badge ? <Badge variant="destructive">{badge}</Badge> : null}
+            {badge ? (
+              <Badge variant={badge.variant} title={badge.title}>
+                {badge.text}
+              </Badge>
+            ) : null}
           </div>
           <p className="truncate text-[13px] text-muted-foreground">
             {subtitle}

@@ -56,8 +56,10 @@
 // a project card ends up hiding the only way to the ones it holds — the
 // reason the registry writes above rescan at all.
 import { useAuditStore } from "@/stores/audit";
+import { useCommitOfferStore } from "@/stores/commit-offer";
 import { useProvenanceStore } from "@/stores/provenance";
 import { useScanStore } from "@/stores/scan";
+import { useSettingsStore } from "@/stores/settings";
 
 export async function rescanEverything(opts?: {
   /** Say so when the scan fails, however many times running. Somebody who
@@ -111,6 +113,31 @@ const readBehindWrites = (): Promise<void> => {
   return queued;
 };
 
+/** Ask what to do with the files a write left in a git project.
+ *
+ *  Every write that renders into a project checkout comes through here:
+ *  [`writingRepo`] calls it, and so does every write that spells
+ *  `rescanEverything` out for itself — this file's header names those, and
+ *  each is a project-scope apply. The offer runs after the write, never
+ *  before it and never as part of it, and the backend answers with nothing
+ *  for a project where there is nothing to ask about.
+ *
+ *  Not awaited by its callers, for the reason the read behind a write is
+ *  not: the caller's own busy window and refusal belong to the write, and
+ *  holding either behind a git read of every project would leave a
+ *  destructive button live with nothing under it. */
+export async function offerToCommit(roots: string[]): Promise<void> {
+  await useCommitOfferStore.getState().enqueue(roots);
+}
+
+/** The project roots a write could have reached: every project this
+ *  machine tracks. A write redirected into another project writes under
+ *  the destination's root, so a caller naming only its own scope would
+ *  miss it. */
+export function trackedProjects(): string[] {
+  return useSettingsStore.getState().settings?.projects ?? [];
+}
+
 /** Run a write that reaches `repo_effects` and read the machine again
  *  behind it.
  *
@@ -131,6 +158,7 @@ export async function writingRepo<R>(body: () => Promise<R>): Promise<R> {
     return await body();
   } finally {
     void readBehindWrites();
+    void offerToCommit(trackedProjects());
   }
 }
 

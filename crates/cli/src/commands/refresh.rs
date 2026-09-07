@@ -32,6 +32,9 @@ pub struct RefreshArgs {
     /// Overwrite installations you edited by hand
     #[arg(long)]
     discard_edits: bool,
+    /// The commit offer's answer, without asking
+    #[command(flatten)]
+    _commit: crate::commands::commit_offer::CommitFlags,
 }
 
 /// What this refresh would add to or drop from the installed set — the part
@@ -187,29 +190,23 @@ pub fn run(
             continue;
         }
         refreshed_anything = true;
-        if report.plan.is_empty() {
-            closing.push(Closing {
-                scope: scope.clone(),
-                count: None,
-                blocked,
-                scored: report.safety.clone(),
-            });
-            continue;
-        }
-        // One closing line for both paths: a run that first asked about
+        // One closing line for every path: a run that first asked about
         // what it installs still ends on the same ledger, since the
-        // outcomes it has to report are the same either way.
-        let applied = match report.set_changes.is_empty() {
-            true => apply_report(env, &report),
-            false => {
+        // outcomes it has to report are the same either way. An empty plan
+        // closes on `None` — up to date — and still reaches the commit
+        // offer, on whatever an earlier run left uncommitted.
+        let applied = match (report.plan.is_empty(), report.set_changes.is_empty()) {
+            (true, _) => apply_report(env, &report).map(|_| None),
+            (false, true) => apply_report(env, &report).map(Some),
+            (false, false) => {
                 print_set_changes(&scope, &report);
-                confirm_and_apply(env, &report, yes)
+                confirm_and_apply(env, &report, yes).map(Some)
             }
         };
         match applied {
-            Ok(applied) => closing.push(Closing {
+            Ok(count) => closing.push(Closing {
                 scope: scope.clone(),
-                count: Some(applied),
+                count,
                 blocked,
                 scored: report.safety.clone(),
             }),

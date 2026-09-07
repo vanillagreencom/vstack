@@ -42,7 +42,7 @@ That one call answers three questions at once.
 | An excluded `edits` target | The **Shared files** block |
 | Everything else | The person's own changes, which the offer counts and never touches |
 
-The set is re-derived immediately before the commit runs. A path that no longer differs is dropped. When none is left, the action reports that nothing was committed and the run ends without a commit.
+The set is re-derived immediately before the commit runs. A path that no longer differs is dropped. When none is left, the action reports that nothing was committed and the run ends without a commit. On the `pr` route the checkout has already moved to the new branch by then, so kendex clears that leftover the way it does after a refused commit there: `git switch -` back and `git branch -d <branch>`, and both surfaces say so with the line the refused commit uses.
 
 `kendex.toml` is the person's file and `.kendex-lock.json` is this machine's install ledger. Neither is in the collection, so neither is ever in the set.
 
@@ -50,7 +50,7 @@ The set is re-derived immediately before the commit runs. A path that no longer 
 
 The offer belongs to a project scope. The global scope is not a checkout and is never offered.
 
-On the CLI it is one call in each verb that applies a plan into a project scope, made once for that scope, after the verb's blocks and before that scope's closing ledger line. It runs for every project scope the run reached, whether the run is about to succeed or about to report failures: a verb that wrote and then failed left the same diffs behind as one that wrote and succeeded. A cancel is the exception and skips it, because a cancelled scope wrote nothing.
+On the CLI it is one call at the seam every verb writes a plan through, `engine_common::apply_report`, made once for each project scope the run reached, after the verb's blocks and before that scope's closing ledger line. One door rather than a call in each verb, so a verb added later cannot forget to ask; once per run per project is kept by the run's own record of which projects answered, not by call-site discipline. It runs for every project scope the run reached, whether the run is about to succeed or about to report failures, and whether or not the plan had anything to write: a verb that wrote and then failed left the same diffs behind as one that wrote and succeeded, and a scope with an empty plan can still hold the files an earlier run left uncommitted, which is what `run again with --commit` relies on. A cancel at the verb's own confirm is the exception and skips it, because a cancelled scope wrote nothing.
 
 Two verbs need naming because they sit at the edges of that rule.
 
@@ -93,12 +93,14 @@ The remote is chosen by rule, never by a prompt: the current branch's upstream r
 The pull-request choice needs three things at once: `gh` on the machine, a credential it will use, and a remote it recognises as a GitHub repository. One command answers all three, and answers a fourth question the offer asks anyway:
 
 ```
-gh pr list --head <branch> --state open --json number,url
+gh pr list --repo <url> --head <branch> --state open --json number,url
 ```
+
+`<url>` is the chosen remote's URL from `git remote get-url`, and every `gh` call carries it as `--repo`: the probe, the open-pull-request lookup and the create. Without it `gh` resolves the repository from the remotes itself, so a project whose `origin` is GitLab and whose second remote is GitHub would be probed against a repository the push never reaches.
 
 - It fails to spawn: `gh` is not installed.
 - It exits non-zero saying it is not authenticated: `gh` is not signed in.
-- It exits non-zero saying no remote points at a known GitHub host: this project is not on GitHub, which is the answer for a GitLab, a Gitea or a local-path remote.
+- It exits non-zero for a `--repo` that is not a GitHub repository it can reach: this project is not on GitHub, which is the answer for a GitLab, a Gitea or a local-path remote. What `gh` says there depends on the URL — a host it cannot query answers with that host's own error, a local path with `expected the "[HOST/]OWNER/REPO" format` — and kendex repeats its first line rather than naming the case itself.
 - It exits zero: the pull-request choice stands, and the rows it returned say whether one is already open for this branch.
 
 The reason a surface prints is `gh`'s own first line, so a case nobody anticipated still names itself rather than reading as one of the three above. The probe runs only where a remote was chosen, so a project with no remote pays no network call for it. It is bounded at 15 s, in the timeouts table.
@@ -113,7 +115,7 @@ kendex does not ask GitHub whether a branch is protected. That answer needs a pe
 | --- | --- | --- | --- | --- |
 | `commit` | `commit them` | `Commit` | `Commit` | the commit sequence below |
 | `push` | `commit them and push to <remote>/<branch>` | `Commit and push` | `Commit and push` | the commit, then `git push <remote> <branch>`, with `--set-upstream` where the branch has none |
-| `pr` | `commit them on a new branch and open a pull request` | `Pull request` | `Open pull request` | `git switch -c <branch>`, the commit, `git push --set-upstream <remote> <branch>`, `gh pr create --head <branch> --base <base> --title <message> --body <body>` |
+| `pr` | `commit them on a new branch and open a pull request` | `Pull request` | `Open pull request` | `git switch -c <branch>`, the commit, `git push --set-upstream <remote> <branch>`, `gh pr create --repo <url> --head <branch> --base <base> --title <message> --body <body>` |
 | `leave` | `leave them as diffs` | not a segment | `Leave as diffs` | nothing |
 
 The commit sequence is `git add` over the set's untracked members, then `git commit --only` over the whole set. Its behaviour is in **How the commit is made** below.
@@ -124,7 +126,7 @@ The new branch is `kendex/renders`, or the first free `kendex/renders-2`, `kende
 
 The base of the pull request is the branch the checkout was on when the offer was made.
 
-Where an open pull request already exists for the current branch, `push` reads `adds a commit to pull request #<n>` in place of `push to <remote>/<branch>`, and `pr` is not offered: the branch already has one. kendex reads this with `gh pr list --head <branch> --state open --json number,url`.
+Where an open pull request already exists for the current branch, `push` reads `commit them and add a commit to pull request #<n>`, and `pr` is not offered: the branch already has one. kendex reads this with the probe above. A `--pull-request` flag there is refused with `no pull request: pull request #<n> is already open for this branch`, the way a flag naming any removed choice is.
 
 ### When a step of the `pr` route fails
 
@@ -155,6 +157,8 @@ The set runs to a thousand paths in a large project, about 58 KB of path text in
 
 kendex writes the set to a file in the system temp directory, NUL-separated, and passes `--pathspec-from-file=<file> --pathspec-file-nul` to `git add`, `git commit` and `git reset`. All three take it. The file is removed when the step ends. It is outside the checkout, so it is never a path the offer could then find.
 
+`--pathspec-file-nul` fixes the separator, not the matching: git still reads each entry as a pathspec, so a rendered path holding `[`, `*` or `?` would match a different file and put a path in the commit that was never in the set. Every one of those three calls therefore runs as `git --literal-pathspecs <subcommand> …`, the git-wide option placed before the subcommand, which takes every entry as the path it is. One option rather than a `:(literal)` prefix per entry, because a path that itself begins with `:` cannot defeat it.
+
 `git status` takes no such option, which is why the status call is unscoped and filtered in kendex instead.
 
 ### What a refusal leaves behind
@@ -167,7 +171,7 @@ It unstages with `git reset -- <paths>`, not `git restore --staged`. `git restor
 
 The default message is `chore: kendex <command>`, where `<command>` is what the person typed, without its flags and arguments: `chore: kendex refresh`, `chore: kendex marketplace subscribe`, `chore: kendex source add`. A subcommand is named with its group, because the group alone is not a command anybody can run. A verb that delegates to another names itself, not the one it called: `kendex updates` runs `refresh`'s plan and its message says `updates`, because that is what the person ran. The message has no body.
 
-The rule is the command, not a list, so no enumeration can fall out of date as the command surface changes.
+The rule is the command, not a list, so no enumeration can fall out of date as the command surface changes. In the app nobody typed a command, so the message names the app: `chore: kendex app`.
 
 
 The message is editable on both surfaces before the commit runs, because a repository's commit-msg hook decides what it will accept and kendex cannot know that rule.
@@ -237,8 +241,10 @@ A precondition that removed a choice prints its reason as a detail line under th
   no pull request: this branch tracks no remote and the repository has more than one
   no pull request: gh is not installed
   no pull request: gh said: To get started with GitHub CLI, please run:  gh auth login
-  no pull request: gh said: none of the git remotes configured for this repository point to a known GitHub host
+  no pull request: gh said: expected the "[HOST/]OWNER/REPO" format, got "/srv/git/site.git"
 ```
+
+The last two are `gh`'s own first line for the repository it was bound to, whatever it turns out to be; the lines above show the shape, not a fixed list.
 
 The reader is asked for the message next, through `ui::ask`, where an empty answer accepts what is offered:
 
@@ -303,7 +309,7 @@ A refused push names what landed and what did not, and offers the way on:
 
 That block is the `commit` and `push` routes. On the `pr` route the commit is already on the branch kendex made, so a refused push there offers only `leave it here`: the recovery below is to put the commit on a branch, and it is there.
 
-Choice 1 pushes the commit that already exists rather than making a branch locally: `git push <remote> HEAD:refs/heads/<branch>`, then `gh pr create --head <branch> --base <current branch> --title <message> --body <body>`. `<branch>` is picked by the first-free rule above, so the push cannot fast-forward a branch somebody else named. The title and body are the ones the `pr` route uses: `gh pr create` with no terminal to prompt at refuses without them. The local branch is left carrying the commit, and the run says how to put it back without doing it:
+Choice 1 pushes the commit that already exists rather than making a branch locally: `git push <remote> HEAD:refs/heads/<branch>`, then `gh pr create --repo <url> --head <branch> --base <current branch> --title <message> --body <body>`. `<branch>` is picked by the first-free rule above, so the push cannot fast-forward a branch somebody else named. The title and body are the ones the `pr` route uses: `gh pr create` with no terminal to prompt at refuses without them. The local branch is left carrying the commit, and the run says how to put it back without doing it:
 
 ```
   pushed to origin/kendex/renders
@@ -358,6 +364,46 @@ The `pr` route's own failures, each ending the block:
   the commit is on kendex/renders in this checkout; kendex did not undo it
 ```
 
+The steps around the commit, each ending the block. A status, branch or remote read that fails leaves the offer unbuildable, and the verb's writes still stand:
+
+```
+/home/method/dev/site: the files kendex wrote could not be checked
+  git said:
+    fatal: not a git repository (or any of the parent directories): .git
+```
+
+A `git add` that fails happens before any commit:
+
+```
+  the files could not be staged
+  git said:
+    fatal: Unable to create '/home/method/dev/site/.git/index.lock': File exists.
+  1  commit again with the same message
+  2  commit again with a different message
+  3  leave them as diffs
+1-3, or Enter to leave them as diffs:
+```
+
+A cleanup `git reset` that fails after a refused commit leaves kendex's own paths staged, against the rule that the index ends as it began, and says so under the refusal it followed:
+
+```
+  the commit was refused
+  git said:
+    commit-msg: crates/ changed without a changelog entry
+  kendex staged 3 files it could not unstage; they are still staged
+```
+
+A `git switch -` or `git branch -d` that fails after a refused commit on the `pr` route is reported the same way, under that refusal, and the run stops there: the checkout is on the branch kendex made.
+
+```
+  the commit was refused
+  git said:
+    commit-msg: crates/ changed without a changelog entry
+  the checkout could not be put back
+  git said:
+    error: cannot switch branch while merging
+```
+
 ### Timed out
 
 A step that ran out of time reads as that step's refusal, with the bound in place of the program's words, and offers whatever that step's refusal offers:
@@ -409,11 +455,14 @@ A flag answers the offer without asking. A precondition that removed the choice 
 | `leave`, or no offer | the verb's own code |
 | Commit, push or pull request went through | the verb's own code |
 | A choice the person took was refused or timed out | 1 |
-| Ctrl-C at the offer | 130, through `ui::cancelled` |
+| A flag named a choice the remote or `gh` preconditions removed | 1 |
+| The files could not be staged, or the checkout could not be put back | 1 |
+| No offer at all — a detached `HEAD`, an operation in progress, a read that failed — whatever flag was passed | the verb's own code |
+| Ctrl-C at the offer | 130 |
 
-A cancel at the offer is not the cancel `refresh.rs` already handles. That one is a cancel at the write confirm, and it drops the scope from the reached list on the ground that the scope wrote nothing. A cancel at the offer comes after the write: the scope keeps its place on that list, so its snapshot is still recorded and its closing ledger line is still printed. Only the offer is skipped.
+A cancel at the offer is not the cancel `refresh.rs` already handles. That one is a cancel at the write confirm, and it drops the scope from the reached list on the ground that the scope wrote nothing. A cancel at the offer comes after the write: the scope keeps its place on that list, so its snapshot is still recorded and its closing ledger line is still printed. Only the offer is skipped, in that project and in every project the run reaches after it, and the run exits 130 once the verb has closed its scopes.
 
-A refused commit, push or pull request is its own failure line and is not counted into `failed to refresh <n> item/source(s)`.
+A refused commit, push or pull request is its own failure line and is not counted into `failed to refresh <n> item/source(s)`. The verb closes its scope as it would have — the snapshot recorded, the ledger line printed with its refusal part — and the run exits 1 once the verb has finished, printing nothing further: the block already carried the words and the way on.
 
 ## App
 
@@ -457,7 +506,7 @@ A segment a precondition removed is not rendered. Its reason is a labelled row u
 | `Pull request` | `This repository has no remote.` |
 | `Pull request` | `This branch tracks no remote and the repository has more than one.` |
 | `Pull request` | `gh is not installed.` |
-| `Pull request` | `gh is not signed in. Run gh auth login.` |
+| `Pull request` | gh's own first line, as **The `gh` probe** fixes it: `To get started with GitHub CLI, please run:  gh auth login`, or whatever `gh` says of a `--repo` that is not a GitHub repository it can reach |
 
 Where every segment but `Commit` is gone, the segmented control is not drawn and the primary button reads `Commit`.
 
@@ -500,6 +549,12 @@ Commit refused:
 
 The `Files` and `Other changes` sections stay as they were, so the person can still see what the commit covers.
 
+A `git add` that failed takes this state with the title `The files could not be staged`: it happens before any commit, so the commit's title would name something that never ran. A cleanup `git reset` that failed adds the line `kendex staged 3 files it could not unstage. They are still staged.` under the section.
+
+Commit refused on the `pr` route where the switch back or the branch removal then failed: this state, with the line `The checkout could not be put back.` after the section and a second `What git said` section under it carrying that step's words, and only the outline `Leave as diffs` in the footer, because the checkout is on the branch kendex made and kendex stops there.
+
+Nothing left to commit on the `pr` route where the switch back then failed: no commit was refused, so the state is titled `The checkout could not be put back`, with the line `Nothing to commit` under the title, the `What git said` section for that step, and only `Leave as diffs` in the footer.
+
 Branch not made, on the `pr` route:
 
 | Element | Copy |
@@ -513,7 +568,7 @@ Branch not made, on the `pr` route:
 
 The `Pull request` segment is gone from that state, so the segmented control offers `Commit` and `Commit and push` only.
 
-Commit refused on the `pr` route: the commit-refused state above, with one line added under its title, `This checkout is back on main and kendex/renders is gone.`
+Commit refused on the `pr` route: the commit-refused state above, with one line added under its title, `This checkout is back on main and kendex/renders is gone.` `Commit again` there runs the `pr` route again from its start, on both surfaces: the branch is made once more and the commit lands on it, because that is the choice the person made and a refused hook does not change it.
 
 Push refused:
 
@@ -529,7 +584,7 @@ Push refused:
 
 The branch in that state's rows is the branch the commit landed on. On the `pr` route that is `kendex/renders`, and `Open a pull request` is not offered there: the commit is already on a branch of its own, which is what the recovery would have made.
 
-`Open a pull request` there runs the same recovery the CLI runs: it pushes the commit that exists to a new branch and opens the pull request, without moving the local branch. Its result state adds two rows to the pull-request result above:
+`Open a pull request` there runs the same recovery the CLI runs: it pushes the commit that exists to a new branch and opens the pull request, without moving the local branch. Its result state is the pull-request result above with two rows in place of the `This checkout is now on` line, which would not be true:
 
 | Element | Copy |
 | --- | --- |
@@ -569,6 +624,7 @@ A dialog that offers nothing is a modal a person has to dismiss for no reason, s
 | --- | --- | --- |
 | Detached HEAD | `12 uncommitted` | `12 files kendex wrote are not committed. This checkout is on no branch.` |
 | Merge, rebase, cherry-pick or bisect in progress | `12 uncommitted` | `12 files kendex wrote are not committed. A rebase is in progress.` |
+| A status, branch or remote read failed | `Not checked` | `kendex could not check the files it wrote here. git said: <git's first line>` |
 
 `ProjectCard` renders its badge as `variant="destructive"`, which is right for its one caller today, `Folder not found`. Uncommitted files are not a fault, so the prop becomes a pair, the text and the variant, and this one passes `info`. `ProjectCard` also gains a `title` for the reason. The badge itself is short because the card's other badges are, and the reason is on hover, the way the app already hides a status word behind one.
 
@@ -603,17 +659,23 @@ Every state, its detection, and where its words are.
 | Remote not decidable | Several remotes, no upstream, no `origin` | Offer, `no push` and `no pull request` reasons | Offer, `Push` and `Pull request` rows |
 | `gh` missing | The probe fails to spawn | Offer, `no pull request: gh is not installed` | Offer, `Pull request` row |
 | `gh` not signed in | The probe exits non-zero | Offer, `no pull request` with gh's first line | Offer, `Pull request` row with gh's first line |
-| The remote is not on GitHub | The probe exits non-zero | Offer, `no pull request` with gh's first line | Offer, `Pull request` row with gh's first line |
+| The remote is not on GitHub | The probe exits non-zero for the `--repo` it was bound to | Offer, `no pull request` with gh's first line | Offer, `Pull request` row with gh's first line |
 | Pull request already open | The probe returns a row | `push` reworded, `pr` not offered | `Commit and push` reworded, `Pull request` segment absent |
 | Detached HEAD | `git symbolic-ref --quiet HEAD` non-zero | One line | Project card badge |
 | Merge, rebase, cherry-pick, bisect | The marker files in the git directory | One line | Project card badge |
 | No terminal | `stdin().is_terminal()` false | One line naming the flags | not reachable |
+| A read failed | `git status`, `symbolic-ref`, `remote` or `show-ref` exits non-zero or does not run | `the files kendex wrote could not be checked`, git's words, no offer | Project card badge `Not checked` |
+| The re-read at commit time failed | `git status` exits non-zero or does not run when the set is re-derived | `the files could not be checked`, git's words, then the commit's three choices | `The files could not be checked`, the commit-refused state |
+| The files could not be staged | `git add` exits non-zero | `the files could not be staged`, git's words, then three choices | `The files could not be staged` |
+| The cleanup could not unstage | `git reset` exits non-zero after a refused commit | The refusal, then `kendex staged N files it could not unstage; they are still staged` | The refusal, then that line |
 | Commit refused | `git commit` exits non-zero | git's words, then three choices | `The commit was refused` |
 | Branch not made, `pr` route | `git switch -c` exits non-zero | git's words, then the choices without `pr` | `The branch could not be made` |
 | Commit refused, `pr` route | `git commit` exits non-zero after the switch | The same, plus the line naming the switch back and the removed branch | The same, plus that line |
+| The checkout could not be put back | `git switch -` or `git branch -d` exits non-zero after that | The refusal, then `the checkout could not be put back` and git's words, no further choice | The refusal, then that line and git's words, `Leave as diffs` only |
 | Push refused, `pr` route | `git push` exits non-zero after the switch | git's words, the commit named on the new branch, no further choice | `Committed, not pushed`, no `Open a pull request` |
 | Push refused, protection or otherwise | `git push` exits non-zero on the `commit` or `push` route | git's words, the commit named, then two choices | `Committed, not pushed` |
 | Pull request refused | `gh pr create` exits non-zero | gh's words, the commit and branch named | `Committed and pushed, no pull request` |
 | A step timed out | The bound in the timeouts table | The CLI's **Timed out** block | The app's **Timed out** state |
-| Nothing left to commit at commit time | The re-read path set is empty | `nothing to commit; the files changed since the offer` | Toast `Nothing to commit`, dialog closes |
+| Nothing left to commit at commit time | The re-read path set is empty | `nothing to commit; the files changed since the offer`, and on the `pr` route the branch is abandoned and `this checkout is back on main and kendex/renders is gone` follows | Toast `Nothing to commit`, dialog closes, the branch abandoned on the `pr` route |
+| A flag named a removed choice | The flag's choice is not on offer | The head line, then that choice's reason, nothing committed | not reachable |
 | Cancelled | Ctrl-C, or the dialog dismissed | exit 130 | The dialog closes, nothing runs |

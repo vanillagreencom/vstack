@@ -8,7 +8,7 @@ import {
   UPDATES_ONE_AT_A_TIME_NOTE,
 } from "@/lib/copy-updates";
 import { packageDisplayName } from "@/lib/labels";
-import { rescanEverything } from "@/lib/rescan";
+import { offerToCommit, rescanEverything, trackedProjects } from "@/lib/rescan";
 import { caught } from "@/lib/settled";
 import { saying } from "@/lib/undone";
 import { rowUnsettled, workOut } from "@/lib/updates-read-state";
@@ -45,6 +45,7 @@ const run = <T>(
     // Then the machine, on `rescan.ts`'s rule: asked whatever the work
     // answered, and inside the busy this wrapper holds.
     await rescanEverything();
+    void offerToCommit(trackedProjects());
   });
 
 const report = (outcome: Outcome<unknown>) => {

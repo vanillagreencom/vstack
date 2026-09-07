@@ -43,6 +43,9 @@ pub struct ApplyArgs {
         conflicts_with_all = ["discard_edits", "replace_unmanaged", "allow_repo_effects"]
     )]
     record_existing: bool,
+    /// The commit offer's answer, without asking
+    #[command(flatten)]
+    _commit: crate::commands::commit_offer::CommitFlags,
 }
 
 pub fn run(env: &Env, args: ApplyArgs) -> CliResult {
