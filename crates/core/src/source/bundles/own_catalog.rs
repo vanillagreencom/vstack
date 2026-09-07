@@ -28,11 +28,12 @@ const A_MEMBER: [(&str, ItemKind, &str); 3] = [
     ("commit-guards", ItemKind::Hook, "block-bare-cd"),
 ];
 
-/// One requirement and one mapping each walk below must observe. Both
-/// reads answer an unreadable file with nothing rather than an error, so
-/// a renamed frontmatter key would otherwise leave every closure
-/// assertion unreached and the whole test green.
+/// One requirement the walk below must observe. The read answers an
+/// unreadable file with nothing rather than an error, so a renamed
+/// frontmatter key would otherwise leave every closure assertion
+/// unreached and the whole test green.
 const A_REQUIREMENT: (&str, &str) = ("orch", "dev");
+
 fn repo_root() -> PathBuf {
     let guess = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     guess.canonicalize().unwrap_or_else(|error| {
