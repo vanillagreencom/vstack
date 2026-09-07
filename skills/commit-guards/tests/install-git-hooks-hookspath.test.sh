@@ -90,6 +90,9 @@ fx_global() { armed global; git config --global core.hooksPath "$R/globalhooks";
 fx_global_install() { armed global-install; git config --global core.hooksPath "$R/globalhooks"; UNDO="git config --global --unset-all core.hooksPath"; }
 fx_included() { armed included; printf '[core]\n\thooksPath = %s/includedhooks\n' "$R" >"$R/extra.cfg"; git -C "$R" config include.path "$R/extra.cfg"; }
 fx_command_line() { armed command-line; }
+# A global value shadowed by a local one: two sources to clear, both listed,
+# in git's order; the summary names the value git reads.
+fx_shadowed() { armed shadowed; git config --global core.hooksPath "$R/globalhooks"; UNDO="git config --global --unset-all core.hooksPath"; set_value "$R/localhooks"; }
 GLOBAL_ORIGIN="  \$'global\\tfile:<root>/home/.gitconfig\\t<repo>/globalhooks'"
 INCLUDED_ORIGIN="  \$'local\\tfile:<repo>/extra.cfg\\t<repo>/includedhooks'"
 COMMAND_ORIGIN="  \$'command\\tcommand line:\\t<repo>/envhooks'"
@@ -97,7 +100,8 @@ run_rows \
   "a global value: the scope and the origin as git spells them|fx_global||check||rc=2 $(undetermined '<repo>/globalhooks' "$(block "$GLOBAL_ORIGIN")")|" \
   "and the install lane prints the same block|fx_global_install||install||rc=0 $(skipped '<repo>/globalhooks' "$(block "$GLOBAL_ORIGIN")")|helper=$OURS pre-commit=$SHIM_PRE commit-msg=$SHIM_MSG hooksPath='<repo>/globalhooks'" \
   "an included file is named under the including scope, as git names it|fx_included||check||rc=2 $(undetermined '<repo>/includedhooks' "$(block "$INCLUDED_ORIGIN")")|" \
-  "a value from the environment is reported as the command line, not a file|fx_command_line|GIT_CONFIG_COUNT=1,GIT_CONFIG_KEY_0=core.hooksPath,GIT_CONFIG_VALUE_0=$TMP/command-line/envhooks|check||rc=2 $(undetermined '<repo>/envhooks' "$(block "$COMMAND_ORIGIN")")|"
+  "a value from the environment is reported as the command line, not a file|fx_command_line|GIT_CONFIG_COUNT=1,GIT_CONFIG_KEY_0=core.hooksPath,GIT_CONFIG_VALUE_0=$TMP/command-line/envhooks|check||rc=2 $(undetermined '<repo>/envhooks' "$(block "$COMMAND_ORIGIN")")|" \
+  "a global value shadowed by a local one lists both sources, nothing dropped or reordered|fx_shadowed||check||rc=2 $(undetermined '<repo>/localhooks' "$SET_LINE;$GLOBAL_ORIGIN;$(local_origin '<repo>/localhooks');$CLEAR")|"
 
 echo "=== a report git will not produce is said to be missing ==="
 # The verdict does not depend on the listing: a git that cannot produce it
@@ -135,7 +139,7 @@ wild() { # NAME — a repository at a path holding a newline and ESC
   git -C "$R" config user.name test
   cp -R "$GG_SKILL_TEMPLATE" "$R/.agents/skills/commit-guards"
   ln -s "$SKILL_DIR/../doc-limits" "$R/.agents/skills/doc-limits"
-  assert_eq "fixture: the path spans two lines" "1" "$(printf '%s' "$R" | wc -l | tr -d ' ')"
+  assert_eq "fixture: $1: the path spans two lines" "1" "$(printf '%s' "$R" | wc -l | tr -d ' ')"
 }
 wild_armed() { wild "$1"; "$R/.agents/skills/commit-guards/scripts/install-git-hooks" --repo "$R" >/dev/null 2>&1 || true; }
 fx_wild_install() { wild wild-install; }
