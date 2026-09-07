@@ -354,26 +354,34 @@ fn gathered<'a>(
     }
 }
 
-/// Each required skill with the place its own delivery wrote it: its
-/// declaration's method, or the scope's default where it made none, which
-/// is also the answer for a skill this scope never declared. Resolved
-/// here because this is where the `Env` a relocated harness root needs is.
+/// Each required skill with the place its own delivery wrote it.
+///
+/// `delivered` is the caller's authority on how a skill was delivered, and
+/// the manifest is only the fallback: a skill can reach a scope without a
+/// declaration of its own — a set's members carry the set's method
+/// (`bundles::member_decl`) and appear in no `[skills.<name>]` table — so
+/// asking the manifest first would answer with the scope default and send
+/// an agent to a tree the set never wrote. Resolved here because this is
+/// where the `Env` a relocated harness root needs is.
 pub(crate) fn required_skills(
     env: &Env,
     scope: &Scope,
     harness: HarnessId,
     manifest: &Manifest,
+    delivered: impl Fn(&str) -> Option<crate::manifest::Method>,
     names: &[String],
 ) -> Vec<RequiredSkill> {
     names
         .iter()
         .map(|name| {
-            let method = manifest
-                .skills
-                .get(name)
-                .map_or(manifest.install.method, |decl| {
-                    super::desired::effective_method(decl, manifest)
-                });
+            let method = delivered(name).unwrap_or_else(|| {
+                manifest
+                    .skills
+                    .get(name)
+                    .map_or(manifest.install.method, |decl| {
+                        super::desired::effective_method(decl, manifest)
+                    })
+            });
             RequiredSkill {
                 name: name.clone(),
                 root: crate::render::agent::skill_root(env, harness, scope, method),
@@ -409,6 +417,13 @@ fn effective_agent<'a>(
             ctx.scope,
             harness,
             ctx.manifest,
+            // The plan being installed is the authority here: it holds a
+            // set member's declaration, which the manifest does not.
+            |skill| {
+                ctx.expansion
+                    .decl_of(ItemKind::Skill, skill)
+                    .map(|decl| super::desired::effective_method(&decl, ctx.manifest))
+            },
             &project.skills.unwrap_or_else(|| upstream_skills.to_vec()),
         ),
         overrides,

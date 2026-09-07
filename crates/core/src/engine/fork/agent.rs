@@ -47,12 +47,25 @@ pub(super) fn capture_agent(of: &ForkOf, edited: &Path) -> Result<CapturedAgent>
         overrides,
         read_at,
     } = published(of)?;
+    // What this scope's last install recorded. A missing or unreadable
+    // record leaves every skill to the manifest fallback, which is the
+    // answer for a scope that has installed nothing yet.
+    let installed = crate::lock::load(&crate::lock::lock_path(env, scope)).unwrap_or_default();
     let around = Around {
         skills: crate::engine::desired_agent::required_skills(
             env,
             scope,
             harness,
             manifest,
+            // A fork reads back an installation, so the record of what was
+            // written is the authority: a set's members are in the lock
+            // under their own delivery and in no `[skills.<name>]` table.
+            |skill| {
+                installed
+                    .entries
+                    .get(&crate::lock::entry_key(ItemKind::Skill, skill, harness))
+                    .map(|entry| entry.method)
+            },
             &carry.as_ref().map(AgentCarry::skills).unwrap_or_default(),
         ),
         overrides,

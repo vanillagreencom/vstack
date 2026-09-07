@@ -345,6 +345,7 @@ fn compute(
                 config: &config,
                 sealed: &sealed,
                 scope_skills: &scope_skills,
+                expansion: &expansion,
                 name,
                 decl,
                 item_path: &item_path,
@@ -395,6 +396,10 @@ pub(super) struct ItemCtx<'a> {
     /// Skills offered by the current checkout of each source. Item-level
     /// pins do not widen this inventory.
     pub(super) scope_skills: &'a super::ScopeSkills,
+    /// The plan this pass is installing, which holds a declaration for
+    /// every derived item — a set's members included — where the manifest
+    /// holds only what the person wrote.
+    pub(super) expansion: &'a super::expansion::Expansion,
     pub(super) name: &'a str,
     pub(super) decl: &'a ItemDecl,
     pub(super) item_path: &'a std::path::Path,

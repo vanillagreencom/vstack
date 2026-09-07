@@ -323,3 +323,46 @@ fn members_that_fold_onto_one_file_install_neither() {
     assert!(!installed(&f, ItemKind::Skill, "deploy"));
     assert!(!installed(&f, ItemKind::Skill, "Deploy"));
 }
+
+/// A set's method reaches its members, and its members are in no
+/// `[skills.<name>]` table — so an agent requiring one is told where the
+/// set's delivery wrote it, not where the scope's default would have.
+/// Asking the manifest first answers `symlink` here and names a tree the
+/// copy never wrote. Gemini because its own project directory is not the
+/// shared tree, so the two deliveries have different answers to give.
+#[test]
+#[allow(clippy::unwrap_used)]
+fn an_agent_reads_a_set_member_from_the_place_the_sets_method_wrote() {
+    let f = fixture(
+        "[bundles.starter]\nsource = \"cat\"\nmethod = \"copy\"\nharnesses = [\"gemini\"]\n\n[agent-skills]\nwriter = [\"dev\"]\n",
+    );
+    apply_now(&f);
+
+    // The copy is a tree only Gemini reads, in its own directory.
+    assert!(f.project.join(".gemini/skills/dev/SKILL.md").is_file());
+    assert!(!f.project.join(".agents/skills/dev").exists());
+    let agent = fs::read_to_string(f.project.join(".gemini/agents/writer.md")).unwrap();
+    assert!(
+        agent.contains("- dev: .gemini/skills/dev/SKILL.md"),
+        "the agent reads the member where the set's copy landed: {agent}"
+    );
+}
+
+/// The pair: the same set delivered the default way writes the shared tree
+/// and the agent is told that, so the assertion above holds because the
+/// set's own method was read and not because one directory is always named.
+#[test]
+#[allow(clippy::unwrap_used)]
+fn an_agent_reads_a_linked_set_member_from_the_shared_tree() {
+    let f = fixture(
+        "[bundles.starter]\nsource = \"cat\"\nharnesses = [\"gemini\"]\n\n[agent-skills]\nwriter = [\"dev\"]\n",
+    );
+    apply_now(&f);
+
+    assert!(f.project.join(".agents/skills/dev/SKILL.md").is_file());
+    let agent = fs::read_to_string(f.project.join(".gemini/agents/writer.md")).unwrap();
+    assert!(
+        agent.contains("- dev: .agents/skills/dev/SKILL.md"),
+        "the agent reads the shared tree: {agent}"
+    );
+}
